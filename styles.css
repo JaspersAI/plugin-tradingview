@@ -1,0 +1,51 @@
+/* The chart's own CSS: TradingView's frame filling the element, and one quiet line under it crediting
+   TradingView. The house style by hand: square, one grey line (#e5e5e5), muted text at #737373. */
+
+.tv-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #fff;
+  color: #171717;
+  font: 13px/1.45 system-ui, -apple-system, sans-serif;
+}
+
+.tv-frame {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+}
+
+.tv-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: #737373;
+}
+
+.tv-credit {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 8px;
+  border-top: 1px solid #e5e5e5;
+}
+
+.tv-credit button {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: #737373;
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.tv-credit button:hover {
+  color: #171717;
+}
