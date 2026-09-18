@@ -1,6 +1,6 @@
 {
   "name": "tradingview",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "TradingView's advanced chart as a Jaspers Terminal view the assistant can drive.",
   "license": "MIT",
   "private": true,
