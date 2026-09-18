@@ -62,6 +62,9 @@ export interface Output extends State {
   quote?: Quote
 }
 
+/** The app's light or dark, which the widget draws in. The view reads it from its page; a panel's state never holds it. */
+export type Scheme = 'light' | 'dark'
+
 /**
  * The panel's state with its defaults, read the forgiving way: main checks what is written against
  * the schema, but stores it as written, so a key that was never set is simply not there.
@@ -86,15 +89,16 @@ export function readState(raw: unknown): State {
 /**
  * The widget's page for a chart, built the way TradingView's embed script builds it: the locale in
  * the query, and the chart as JSON in the hash, so changing the chart is loading another address.
+ * Its theme is the app's scheme, in the hash like the rest, so light and dark are two addresses.
  */
-export function widgetUrl(state: State): string {
+export function widgetUrl(state: State, scheme: Scheme): string {
   const chart = {
     symbol: state.symbol,
     interval: state.interval,
     ...(state.range ? { range: state.range } : {}),
     style: STYLE_CODES[state.style],
     studies: state.studies.map((study) => STUDY_IDS[study]),
-    theme: 'light',
+    theme: scheme,
     autosize: true,
     allow_symbol_change: true,
     support_host: 'https://www.tradingview.com',

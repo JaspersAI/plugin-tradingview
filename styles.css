@@ -1,14 +1,16 @@
 /* The chart's own CSS: TradingView's frame filling the element, and one quiet line under it crediting
-   TradingView. The house style by hand: square, one grey line (#e5e5e5), muted text at #737373. */
+   TradingView. The house style by hand: square, one grey line, muted text. Colours are the app's theme
+   variables, so the view follows its light and dark, each with its light value as the fallback for an
+   app from before the theme. */
 
 .tv-root {
   display: flex;
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background: #fff;
-  color: #171717;
-  font: 13px/1.45 system-ui, -apple-system, sans-serif;
+  background: var(--jaspers-background, #fff);
+  color: var(--jaspers-foreground, #171717);
+  font: 13px/1.45 var(--jaspers-font-sans, system-ui, -apple-system, sans-serif);
 }
 
 .tv-frame {
@@ -25,7 +27,7 @@
   align-items: center;
   justify-content: center;
   margin: 0;
-  color: #737373;
+  color: var(--jaspers-muted-foreground, #737373);
 }
 
 .tv-credit {
@@ -33,19 +35,19 @@
   display: flex;
   justify-content: flex-end;
   padding: 0 8px;
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid var(--jaspers-border, #e5e5e5);
 }
 
 .tv-credit button {
   padding: 2px 0;
   border: 0;
   background: none;
-  color: #737373;
+  color: var(--jaspers-muted-foreground, #737373);
   font-size: 11px;
   line-height: 16px;
   cursor: pointer;
 }
 
 .tv-credit button:hover {
-  color: #171717;
+  color: var(--jaspers-foreground, #171717);
 }

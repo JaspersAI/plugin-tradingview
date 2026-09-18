@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { nextQuote, QUOTE_EVERY_MS, type Quote, readQuote, readState, summarize, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
+import { nextQuote, QUOTE_EVERY_MS, type Quote, readQuote, readState, type State, summarize, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
 
 // The plugin's pure half: the state a panel holds read the forgiving way, the widget's address,
 // the quotes the widget posts, how often one is published, and the line the model's map carries.
@@ -54,7 +54,7 @@ test('a range set to null is cleared, and studies stop at the most a chart takes
 })
 
 test('the widget address is the advanced chart page with the chart in its hash', () => {
-  const url = new URL(widgetUrl({ symbol: 'NASDAQ:AAPL', interval: 'D', style: 'candles', studies: [] }))
+  const url = new URL(widgetUrl({ symbol: 'NASDAQ:AAPL', interval: 'D', style: 'candles', studies: [] }, 'light'))
   assert.equal(url.origin, WIDGET_ORIGIN)
   assert.equal(url.pathname, '/embed-widget/advanced-chart/')
   assert.equal(url.search, '?locale=en')
@@ -71,8 +71,18 @@ test('the widget address is the advanced chart page with the chart in its hash',
   })
 })
 
+test('the widget draws in the scheme it is given, so light and dark are two addresses for one chart', () => {
+  const aapl: State = { symbol: 'NASDAQ:AAPL', interval: 'D', style: 'candles', studies: [] }
+  const light = widgetUrl(aapl, 'light')
+  const dark = widgetUrl(aapl, 'dark')
+  assert.notEqual(dark, light)
+  const chart = (url: string) => JSON.parse(decodeURIComponent(new URL(url).hash.slice(1)))
+  assert.equal(chart(dark).theme, 'dark')
+  assert.deepEqual({ ...chart(dark), theme: 'light' }, chart(light))
+})
+
 test('a range, a style, and studies go to the widget by the names it knows them by', () => {
-  const url = new URL(widgetUrl({ symbol: 'AMEX:SPY', interval: 'W', range: '3M', style: 'heikin-ashi', studies: ['bollinger-bands', 'vwap'] }))
+  const url = new URL(widgetUrl({ symbol: 'AMEX:SPY', interval: 'W', range: '3M', style: 'heikin-ashi', studies: ['bollinger-bands', 'vwap'] }, 'light'))
   const chart = JSON.parse(decodeURIComponent(url.hash.slice(1)))
   assert.equal(chart.range, '3M')
   assert.equal(chart.style, '8')
