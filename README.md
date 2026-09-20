@@ -2,7 +2,7 @@
 
 TradingView chart for [Jaspers Terminal](https://github.com/JaspersAI), an open source, extensible desktop terminal for financial research.
 
-One view, `tradingview/chart`: TradingView's own advanced chart widget, with its data and tools. The assistant sets the symbol, bar size, range, chart type, and up to six indicators, and reads back the last price.
+One view, `tradingview/chart`: TradingView's own advanced chart widget, with its data and tools. The assistant sets the symbol — a ticker, or an index, future, commodity, or coin named in words, like the S&P 500 — the bar size, range, chart type, up to five indicators, symbols to compare, and extended hours, and reads back the last price.
 
 ## Install
 
