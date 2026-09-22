@@ -11,10 +11,76 @@ export const INTERVALS = ['1', '3', '5', '15', '30', '60', '120', '180', '240', 
 /** How much history shows. The widget picks the bar size for a range itself. */
 export const RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '12M', '60M', 'ALL'] as const
 
+/**
+ * What people call the indices, futures, and macro symbols, against the symbol TradingView charts
+ * them under: 'S&P 500', 'SPX', and 'Dow' reach no chart on their own, since the widget wants an
+ * exchange. Keys are the name with everything but letters and digits dropped, so case, spaces, '&',
+ * and dots do not matter. Every symbol here was checked against TradingView's own symbol search.
+ */
+const SYMBOL_ALIASES: Record<string, string> = {
+  // Indices.
+  SP: 'SP:SPX',
+  SP500: 'SP:SPX',
+  SPX: 'SP:SPX',
+  SPX500: 'SP:SPX',
+  NDX: 'NASDAQ:NDX',
+  NAS100: 'NASDAQ:NDX',
+  NASDAQ100: 'NASDAQ:NDX',
+  IXIC: 'NASDAQ:IXIC',
+  NASDAQCOMPOSITE: 'NASDAQ:IXIC',
+  DJI: 'DJ:DJI',
+  DJIA: 'DJ:DJI',
+  DOW: 'DJ:DJI',
+  DOWJONES: 'DJ:DJI',
+  RUT: 'TVC:RUT',
+  RUSSELL: 'TVC:RUT',
+  RUSSELL2000: 'TVC:RUT',
+  VIX: 'CBOE:VIX',
+  DXY: 'TVC:DXY',
+  DOLLARINDEX: 'TVC:DXY',
+  // Treasury yields.
+  US10Y: 'TVC:US10Y',
+  US10YR: 'TVC:US10Y',
+  UST10Y: 'TVC:US10Y',
+  US2Y: 'TVC:US02Y',
+  US02Y: 'TVC:US02Y',
+  UST2Y: 'TVC:US02Y',
+  // Commodities. A company named for the metal keeps its own chart: NYSE:GOLD carries a prefix.
+  GOLD: 'TVC:GOLD',
+  XAU: 'TVC:GOLD',
+  SILVER: 'TVC:SILVER',
+  XAG: 'TVC:SILVER',
+  OIL: 'TVC:USOIL',
+  USOIL: 'TVC:USOIL',
+  WTI: 'TVC:USOIL',
+  CRUDE: 'TVC:USOIL',
+  CRUDEOIL: 'TVC:USOIL',
+  // Futures, as the continuous front-month contract.
+  ES: 'CME_MINI:ES1!',
+  ES1: 'CME_MINI:ES1!',
+  SPFUTURES: 'CME_MINI:ES1!',
+  SP500FUTURES: 'CME_MINI:ES1!',
+  NQ: 'CME_MINI:NQ1!',
+  NQ1: 'CME_MINI:NQ1!',
+  NASDAQFUTURES: 'CME_MINI:NQ1!',
+  // Crypto, on the venue with the deepest book the widget carries.
+  BTC: 'BINANCE:BTCUSDT',
+  BTCUSD: 'BINANCE:BTCUSDT',
+  BITCOIN: 'BINANCE:BTCUSDT',
+  ETH: 'BINANCE:ETHUSDT',
+  ETHUSD: 'BINANCE:ETHUSDT',
+  ETHEREUM: 'BINANCE:ETHUSDT',
+}
+
 /** Chart types by name, and the number TradingView knows each by. */
 const STYLE_CODES = { candles: '1', bars: '0', line: '2', area: '3', 'heikin-ashi': '8', 'hollow-candles': '9' } as const
 
-/** Indicators by name, and TradingView's id for each: the ones seen drawing in the widget. */
+/**
+ * Indicators by name, and TradingView's id for each. The ids are the widget's own: its bundle carries
+ * a table from the old `RSI@tv-basicstudies` names to these, and only ids found there are listed, so
+ * an indicator the widget would silently drop is not offered. Ichimoku and Supertrend are missing
+ * from that table, so they are left out rather than guessed at.
+ */
 const STUDY_IDS = {
   rsi: 'STD;RSI',
   macd: 'STD;MACD',
@@ -22,6 +88,16 @@ const STUDY_IDS = {
   ema: 'STD;EMA',
   'bollinger-bands': 'STD;Bollinger_Bands',
   vwap: 'STD;VWAP',
+  stochastic: 'STD;Stochastic',
+  'stochastic-rsi': 'STD;Stochastic_RSI',
+  atr: 'STD;Average_True_Range',
+  // TradingView draws ADX with the +DI and -DI lines, under the directional movement id.
+  adx: 'STD;DMI',
+  obv: 'STD;On_Balance_Volume',
+  cci: 'STD;CCI',
+  'keltner-channels': 'STD;Keltner_Channels',
+  'donchian-channels': 'STD;Donchian_Channels',
+  'parabolic-sar': 'STD;PSAR',
 } as const
 
 export type Interval = (typeof INTERVALS)[number]
@@ -32,19 +108,30 @@ export type Study = keyof typeof STUDY_IDS
 export const STYLES = Object.keys(STYLE_CODES) as [Style, ...Style[]]
 export const STUDIES = Object.keys(STUDY_IDS) as [Study, ...Study[]]
 
-/** More indicators than this and the chart is all panes. */
+/**
+ * The widget takes five indicators and drops the rest: its embed slices the studies it was given to
+ * five unless the page is a TradingView customer's. Volume is not one of them, since the widget
+ * draws it under the price by itself.
+ */
 export const MAX_STUDIES = 5
+
+/** Symbols drawn over the main one. More than this and one pane is a thicket. */
+export const MAX_COMPARE = 3
 
 /** How often a price that keeps moving is published: every publish is a push of the whole app state. */
 export const QUOTE_EVERY_MS = 15_000
 
 export interface State {
-  /** EXCHANGE:TICKER, like NASDAQ:AAPL. Empty until one is set. */
+  /** EXCHANGE:TICKER, like NASDAQ:AAPL, once resolved. Empty until one is set. */
   symbol: string
   interval: Interval
   range?: Range
   style: Style
   studies: Study[]
+  /** Symbols drawn over the main one for comparison. Absent when there are none. */
+  compare?: string[]
+  /** Pre- and post-market bars, where the exchange has them. Absent means regular hours. */
+  extendedHours?: boolean
 }
 
 /** The latest quote the widget posted: the symbol it is showing and its price. */
@@ -77,13 +164,34 @@ export function readState(raw: unknown): State {
     if (typeof study === 'string' && Object.hasOwn(STUDY_IDS, study) && !studies.includes(study as Study)) studies.push(study as Study)
   }
   const style = state['style']
+  const symbol = resolveSymbol(state['symbol'])
+  const compare: string[] = []
+  for (const written of Array.isArray(state['compare']) ? state['compare'] : []) {
+    const other = resolveSymbol(written)
+    // The main symbol drawn over itself is a line on a line.
+    if (other !== '' && other !== symbol && !compare.includes(other)) compare.push(other)
+  }
   return {
-    symbol: typeof state['symbol'] === 'string' ? state['symbol'].trim().toUpperCase() : '',
+    symbol,
     interval: INTERVALS.find((i) => i === state['interval']) ?? 'D',
     ...(range ? { range } : {}),
     style: typeof style === 'string' && Object.hasOwn(STYLE_CODES, style) ? (style as Style) : 'candles',
     studies: studies.slice(0, MAX_STUDIES),
+    ...(compare.length ? { compare: compare.slice(0, MAX_COMPARE) } : {}),
+    ...(state['extendedHours'] === true ? { extendedHours: true } : {}),
   }
+}
+
+/**
+ * The symbol TradingView charts for what was written: an alias as the symbol it stands for, anything
+ * else as written, in the case the widget uses. A symbol that already names its exchange is never
+ * rewritten, so NYSE:GOLD stays Barrick while 'gold' is the metal.
+ */
+export function resolveSymbol(raw: unknown): string {
+  if (typeof raw !== 'string') return ''
+  const written = raw.trim().toUpperCase()
+  if (written === '' || written.includes(':')) return written
+  return SYMBOL_ALIASES[written.replace(/[^A-Z0-9]/g, '')] ?? written
 }
 
 /**
@@ -98,6 +206,12 @@ export function widgetUrl(state: State, scheme: Scheme): string {
     ...(state.range ? { range: state.range } : {}),
     style: STYLE_CODES[state.style],
     studies: state.studies.map((study) => STUDY_IDS[study]),
+    // The widget's compare only acts on SameScale, NewPriceScale, and NewPane; an overlay in the
+    // price pane is what comparing two symbols on one chart means here.
+    ...(state.compare?.length
+      ? { compareSymbols: state.compare.map((symbol) => ({ symbol, position: 'SameScale' })) }
+      : {}),
+    ...(state.extendedHours ? { extended_hours: true } : {}),
     theme: scheme,
     autosize: true,
     allow_symbol_change: true,
@@ -143,7 +257,14 @@ export function summarize(state: unknown, output: unknown): string {
   const chart = readState(state)
   const quote = record(record(output)?.['quote']) as Quote | null
   const head = quote ? [quote.name, String(quote.last), percent(quote.changePercent)].filter(Boolean).join(' ') : chart.symbol
-  return [`Chart: ${head}`, chart.range ?? chart.interval, chart.style, ...chart.studies].join(', ')
+  return [
+    `Chart: ${head}`,
+    chart.range ?? chart.interval,
+    chart.style,
+    ...chart.studies,
+    ...(chart.compare ? [`vs ${chart.compare.join(' ')}`] : []),
+    ...(chart.extendedHours ? ['extended hours'] : []),
+  ].join(', ')
 }
 
 function percent(value: number | undefined): string {

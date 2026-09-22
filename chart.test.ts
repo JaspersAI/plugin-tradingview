@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { nextQuote, QUOTE_EVERY_MS, type Quote, readQuote, readState, type State, summarize, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
+import { MAX_COMPARE, nextQuote, QUOTE_EVERY_MS, type Quote, readQuote, readState, resolveSymbol, type State, summarize, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
 
 // The plugin's pure half: the state a panel holds read the forgiving way, the widget's address,
 // the quotes the widget posts, how often one is published, and the line the model's map carries.
@@ -53,6 +53,50 @@ test('a range set to null is cleared, and studies stop at the most a chart takes
   assert.deepEqual(six, ['rsi', 'macd', 'sma', 'ema', 'vwap'])
 })
 
+test('an index, a future, or a commodity the user names in words resolves to the symbol TradingView charts', () => {
+  assert.equal(resolveSymbol('S&P 500'), 'SP:SPX')
+  assert.equal(resolveSymbol(' sp500 '), 'SP:SPX')
+  assert.equal(resolveSymbol('spx'), 'SP:SPX')
+  assert.equal(resolveSymbol('NASDAQ 100'), 'NASDAQ:NDX')
+  assert.equal(resolveSymbol('dow'), 'DJ:DJI')
+  assert.equal(resolveSymbol('D.J.I.A.'), 'DJ:DJI')
+  assert.equal(resolveSymbol('Russell 2000'), 'TVC:RUT')
+  assert.equal(resolveSymbol('vix'), 'CBOE:VIX')
+  assert.equal(resolveSymbol('US 10Y'), 'TVC:US10Y')
+  assert.equal(resolveSymbol('gold'), 'TVC:GOLD')
+  assert.equal(resolveSymbol('WTI'), 'TVC:USOIL')
+  assert.equal(resolveSymbol('ES1!'), 'CME_MINI:ES1!')
+  assert.equal(resolveSymbol('nq'), 'CME_MINI:NQ1!')
+  assert.equal(resolveSymbol('Bitcoin'), 'BINANCE:BTCUSDT')
+})
+
+test('a symbol that names its exchange, or is no alias at all, is left as the widget takes it', () => {
+  assert.equal(resolveSymbol('NYSE:GOLD'), 'NYSE:GOLD')
+  assert.equal(resolveSymbol(' sp:spx '), 'SP:SPX')
+  assert.equal(resolveSymbol('aapl'), 'AAPL')
+  assert.equal(resolveSymbol('BRK.B'), 'BRK.B')
+  assert.equal(resolveSymbol(''), '')
+  assert.equal(resolveSymbol(7), '')
+})
+
+test('the symbols to compare are resolved too, deduped, and stop at the most a pane takes', () => {
+  assert.deepEqual(readState({ symbol: 'spx', compare: ['gold', 'oil'] }).compare, ['TVC:GOLD', 'TVC:USOIL'])
+  // The main symbol, by either name, is already the chart.
+  assert.equal(readState({ symbol: 'spx', compare: ['S&P 500', 'SP:SPX'] }).compare, undefined)
+  assert.deepEqual(readState({ symbol: 'AAPL', compare: ['msft', 'MSFT', 7, ' '] }).compare, ['MSFT'])
+  const many = readState({ symbol: 'AAPL', compare: ['MSFT', 'NVDA', 'AMZN', 'GOOGL'] }).compare
+  assert.deepEqual(many, ['MSFT', 'NVDA', 'AMZN'])
+  assert.equal(many?.length, MAX_COMPARE)
+  assert.equal(readState({ symbol: 'AAPL', compare: null }).compare, undefined)
+})
+
+test('extended hours is on only when it is asked for', () => {
+  assert.equal(readState({ symbol: 'AAPL', extendedHours: true }).extendedHours, true)
+  assert.equal(readState({ symbol: 'AAPL', extendedHours: 'yes' }).extendedHours, undefined)
+  assert.equal(readState({ symbol: 'AAPL', extendedHours: false }).extendedHours, undefined)
+  assert.equal(readState({ symbol: 'AAPL' }).extendedHours, undefined)
+})
+
 test('the widget address is the advanced chart page with the chart in its hash', () => {
   const url = new URL(widgetUrl({ symbol: 'NASDAQ:AAPL', interval: 'D', style: 'candles', studies: [] }, 'light'))
   assert.equal(url.origin, WIDGET_ORIGIN)
@@ -89,6 +133,16 @@ test('a range, a style, and studies go to the widget by the names it knows them 
   assert.deepEqual(chart.studies, ['STD;Bollinger_Bands', 'STD;VWAP'])
 })
 
+test('symbols to compare go to the widget as overlays in the price pane, and extended hours as its session', () => {
+  const state: State = { symbol: 'SP:SPX', interval: 'D', style: 'candles', studies: [], compare: ['TVC:GOLD'], extendedHours: true }
+  const chart = JSON.parse(decodeURIComponent(new URL(widgetUrl(state, 'dark')).hash.slice(1)))
+  assert.deepEqual(chart.compareSymbols, [{ symbol: 'TVC:GOLD', position: 'SameScale' }])
+  assert.equal(chart.extended_hours, true)
+  const plain = JSON.parse(decodeURIComponent(new URL(widgetUrl({ ...state, compare: [], extendedHours: false }, 'dark')).hash.slice(1)))
+  assert.equal('compareSymbols' in plain, false)
+  assert.equal('extended_hours' in plain, false)
+})
+
 test('a quoteUpdate reads as a quote, posted as an object or as JSON', () => {
   assert.deepEqual(readQuote(QUOTE_UPDATE), AAPL)
   assert.deepEqual(readQuote(JSON.stringify(QUOTE_UPDATE)), AAPL)
@@ -120,4 +174,5 @@ test('the summary names the symbol, its price once there is one, and how it is d
   assert.equal(summarize({ symbol: 'NASDAQ:AAPL', range: '3M', style: 'line', studies: ['rsi'] }, { quote: AAPL }), 'Chart: AAPL 332.27 +1.75%, 3M, line, rsi')
   assert.equal(summarize({ symbol: 'NASDAQ:MSFT' }, { quote: { name: 'MSFT', last: 495.84, changePercent: -0.194 } }), 'Chart: MSFT 495.84 -0.19%, D, candles')
   assert.equal(summarize({ symbol: 'NASDAQ:MSFT' }, { quote: { name: 'MSFT', last: 495.84 } }), 'Chart: MSFT 495.84, D, candles')
+  assert.equal(summarize({ symbol: 'S&P 500', compare: ['gold'], extendedHours: true }, {}), 'Chart: SP:SPX, D, candles, vs TVC:GOLD, extended hours')
 })
