@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { MAX_COMPARE, nextQuote, QUOTE_EVERY_MS, type Quote, readQuote, readState, resolveSymbol, type State, summarize, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
+import { MAX_COMPARE, nextQuote, optionUnderlying, QUOTE_EVERY_MS, type Quote, readQuote, readState, resolveSymbol, type State, summarize, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
 
 // The plugin's pure half: the state a panel holds read the forgiving way, the widget's address,
 // the quotes the widget posts, how often one is published, and the line the model's map carries.
@@ -175,4 +175,21 @@ test('the summary names the symbol, its price once there is one, and how it is d
   assert.equal(summarize({ symbol: 'NASDAQ:MSFT' }, { quote: { name: 'MSFT', last: 495.84, changePercent: -0.194 } }), 'Chart: MSFT 495.84 -0.19%, D, candles')
   assert.equal(summarize({ symbol: 'NASDAQ:MSFT' }, { quote: { name: 'MSFT', last: 495.84 } }), 'Chart: MSFT 495.84, D, candles')
   assert.equal(summarize({ symbol: 'S&P 500', compare: ['gold'], extendedHours: true }, {}), 'Chart: SP:SPX, D, candles, vs TVC:GOLD, extended hours')
+})
+
+test('an option contract is known for one, with its underlying, and nothing else is', () => {
+  assert.equal(optionUnderlying('OPRA:FLWS261016C3.0'), 'FLWS')
+  assert.equal(optionUnderlying('OPRA:AAPL261016P150'), 'AAPL')
+  assert.equal(optionUnderlying('FLWS261016C3.0'), 'FLWS')
+  assert.equal(optionUnderlying('OPRA:SOMETHING'), '')
+  for (const symbol of ['NASDAQ:FLWS', 'NYSE:NOK', 'NOK', 'CME_MINI:ES1!', 'TVC:US10Y', 'BINANCE:BTCUSDT', 'BRK.B', '']) {
+    assert.equal(optionUnderlying(symbol), null, symbol)
+  }
+})
+
+test('the summary of an option contract says the widget draws nothing and names the underlying', () => {
+  assert.equal(
+    summarize({ symbol: 'OPRA:FLWS261016C3.0' }, { symbol: 'OPRA:FLWS261016C3.0' }),
+    "Chart: OPRA:FLWS261016C3.0 is an option contract, which TradingView's widget does not chart; nothing is drawn. Set symbol to the underlying, FLWS",
+  )
 })

@@ -8,6 +8,7 @@ import {
 import { useBridge, useData, usePublish, type PanelRef } from "@jaspers-ai/sdk";
 import {
   nextQuote,
+  optionUnderlying,
   QUOTE_EVERY_MS,
   readQuote,
   readState,
@@ -54,7 +55,10 @@ function Chart({
   const bridge = useBridge();
   const scheme = useColorScheme();
   const state = readState(raw);
-  const url = state.symbol ? widgetUrl(state, scheme) : null;
+  // The widget charts no option contracts: it would load and draw nothing, so say so instead.
+  const underlying = optionUnderlying(state.symbol);
+  const url =
+    state.symbol && underlying === null ? widgetUrl(state, scheme) : null;
   const frame = useRef<HTMLIFrameElement>(null);
   const latest = useRef<Quote | null>(null);
   const shown = useRef<{ quote: Quote | null; at: number }>({
@@ -118,6 +122,11 @@ function Chart({
           src={url}
           title={`${state.symbol} chart`}
         />
+      ) : underlying !== null ? (
+        <p className="tv-empty">
+          TradingView's chart does not show option contracts
+          {underlying ? `; chart ${underlying} for the stock.` : "."}
+        </p>
       ) : (
         <p className="tv-empty">No symbol set.</p>
       )}

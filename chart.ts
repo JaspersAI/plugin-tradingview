@@ -195,6 +195,20 @@ export function resolveSymbol(raw: unknown): string {
 }
 
 /**
+ * An option contract, as TradingView names one: OPRA:FLWS261016C3.0, the root, the expiry as
+ * YYMMDD, C or P, and the strike. TradingView's widget charts no option contracts, so the view says
+ * so instead of loading a widget that shows nothing.
+ */
+const OPTION_SYMBOL = /^(?:OPRA:)?([A-Z][A-Z.]{0,5})\d{6}[CP]\d+(?:\.\d+)?$/
+
+/** The underlying's ticker when the symbol is an option contract, which the widget cannot chart; null for anything else. */
+export function optionUnderlying(symbol: string): string | null {
+  const match = OPTION_SYMBOL.exec(symbol)
+  if (match) return match[1]!
+  return symbol.startsWith('OPRA:') ? '' : null
+}
+
+/**
  * The widget's page for a chart, built the way TradingView's embed script builds it: the locale in
  * the query, and the chart as JSON in the hash, so changing the chart is loading another address.
  * Its theme is the app's scheme, in the hash like the rest, so light and dark are two addresses.
@@ -255,6 +269,10 @@ export function nextQuote(shown: Quote | null, shownAt: number, latest: Quote | 
 /** The line the model's map carries for a chart. */
 export function summarize(state: unknown, output: unknown): string {
   const chart = readState(state)
+  const underlying = optionUnderlying(chart.symbol)
+  if (underlying !== null) {
+    return `Chart: ${chart.symbol} is an option contract, which TradingView's widget does not chart; nothing is drawn${underlying ? `. Set symbol to the underlying, ${underlying}` : ''}`
+  }
   const quote = record(record(output)?.['quote']) as Quote | null
   const head = quote ? [quote.name, String(quote.last), percent(quote.changePercent)].filter(Boolean).join(' ') : chart.symbol
   return [

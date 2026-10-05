@@ -13,7 +13,7 @@ const StateSchema = z.object({
     .string()
     .min(1)
     .describe(
-      'EXCHANGE:TICKER, like NASDAQ:AAPL, AMEX:SPY, BINANCE:BTCUSDT, FX:EURUSD. A bare US ticker works too, and so do the index, futures, commodity, and crypto names (S&P 500, SPX, NASDAQ 100, Dow, Russell 2000, VIX, DXY, US 10Y, gold, oil, ES, NQ, bitcoin), which resolve to the symbol TradingView charts them under.',
+      'EXCHANGE:TICKER, like NASDAQ:AAPL, AMEX:SPY, BINANCE:BTCUSDT, FX:EURUSD. A bare US ticker works too, and so do the index, futures, commodity, and crypto names (S&P 500, SPX, NASDAQ 100, Dow, Russell 2000, VIX, DXY, US 10Y, gold, oil, ES, NQ, bitcoin), which resolve to the symbol TradingView charts them under. Not an option contract (OPRA:…): the widget charts none.',
     ),
   interval: z.enum(INTERVALS).default('D').describe('Bar size: 1 to 240 minutes, D, W, or M.'),
   range: z.enum(RANGES).nullable().optional().describe('How much history shows. When set, the widget picks the bar size for it; null clears it.'),
