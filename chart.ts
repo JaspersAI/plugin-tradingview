@@ -12,6 +12,160 @@ export const INTERVALS = ['1', '3', '5', '15', '30', '60', '120', '180', '240', 
 export const RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '12M', '60M', 'ALL'] as const
 
 /**
+ * The explicit timezone ids TradingView's widget accepts (`availableTimezones` in its bundle, apart
+ * from `'exchange'`, which is the default when `state.timezone` is unset). Any string outside this
+ * list is ignored by `timezoneIsAvailable` in the widget and leaves it on `Etc/UTC`.
+ */
+export const TIMEZONES = [
+  'Etc/UTC',
+  'Africa/Cairo',
+  'Africa/Casablanca',
+  'Africa/Johannesburg',
+  'Africa/Lagos',
+  'Africa/Nairobi',
+  'Africa/Tunis',
+  'America/Anchorage',
+  'America/Argentina/Buenos_Aires',
+  'America/Bogota',
+  'America/Caracas',
+  'America/Chicago',
+  'America/El_Salvador',
+  'America/Halifax',
+  'America/Juneau',
+  'America/Lima',
+  'America/Los_Angeles',
+  'America/Mexico_City',
+  'America/New_York',
+  'America/Phoenix',
+  'America/Santiago',
+  'America/Sao_Paulo',
+  'America/Toronto',
+  'America/Vancouver',
+  'US/Mountain',
+  'Asia/Almaty',
+  'Asia/Ashkhabad',
+  'Asia/Bahrain',
+  'Asia/Bangkok',
+  'Asia/Chongqing',
+  'Asia/Colombo',
+  'Asia/Dhaka',
+  'Asia/Dubai',
+  'Asia/Ho_Chi_Minh',
+  'Asia/Hong_Kong',
+  'Asia/Jakarta',
+  'Asia/Jerusalem',
+  'Asia/Karachi',
+  'Asia/Kabul',
+  'Asia/Kathmandu',
+  'Asia/Kolkata',
+  'Asia/Kuala_Lumpur',
+  'Asia/Kuwait',
+  'Asia/Manila',
+  'Asia/Muscat',
+  'Asia/Nicosia',
+  'Asia/Qatar',
+  'Asia/Riyadh',
+  'Asia/Seoul',
+  'Asia/Shanghai',
+  'Asia/Singapore',
+  'Asia/Taipei',
+  'Asia/Tehran',
+  'Asia/Tokyo',
+  'Asia/Yangon',
+  'Atlantic/Azores',
+  'Atlantic/Reykjavik',
+  'Australia/Adelaide',
+  'Australia/Brisbane',
+  'Australia/Perth',
+  'Australia/Sydney',
+  'Europe/Amsterdam',
+  'Europe/Athens',
+  'Europe/Belgrade',
+  'Europe/Berlin',
+  'Europe/Bratislava',
+  'Europe/Brussels',
+  'Europe/Bucharest',
+  'Europe/Budapest',
+  'Europe/Copenhagen',
+  'Europe/Dublin',
+  'Europe/Helsinki',
+  'Europe/Istanbul',
+  'Europe/Lisbon',
+  'Europe/Ljubljana',
+  'Europe/London',
+  'Europe/Luxembourg',
+  'Europe/Madrid',
+  'Europe/Malta',
+  'Europe/Moscow',
+  'Europe/Oslo',
+  'Europe/Paris',
+  'Europe/Prague',
+  'Europe/Riga',
+  'Europe/Rome',
+  'Europe/Sofia',
+  'Europe/Stockholm',
+  'Europe/Tallinn',
+  'Europe/Vienna',
+  'Europe/Vilnius',
+  'Europe/Warsaw',
+  'Europe/Zagreb',
+  'Europe/Zurich',
+  'Pacific/Auckland',
+  'Pacific/Chatham',
+  'Pacific/Fakaofo',
+  'Pacific/Honolulu',
+  'Pacific/Norfolk',
+] as const
+
+export type Timezone = (typeof TIMEZONES)[number]
+
+const TIMEZONE_BY_KEY = new Map<string, Timezone>(TIMEZONES.map((tz) => [tz.toUpperCase(), tz]))
+
+/**
+ * Common abbreviations and IANA names that are missing from TradingView's `availableTimezones`
+ * table (for example, TradingView lists `US/Mountain` rather than `America/Denver`), mapped to the
+ * id the widget accepts.
+ */
+const TIMEZONE_ALIASES: Record<string, Timezone> = {
+  UTC: 'Etc/UTC',
+  GMT: 'Etc/UTC',
+  'ETC/GMT': 'Etc/UTC',
+  Z: 'Etc/UTC',
+  EST: 'America/New_York',
+  EDT: 'America/New_York',
+  ET: 'America/New_York',
+  'US/EASTERN': 'America/New_York',
+  'AMERICA/DETROIT': 'America/New_York',
+  'AMERICA/INDIANAPOLIS': 'America/New_York',
+  'AMERICA/INDIANA/INDIANAPOLIS': 'America/New_York',
+  CST: 'America/Chicago',
+  CDT: 'America/Chicago',
+  CT: 'America/Chicago',
+  'US/CENTRAL': 'America/Chicago',
+  MST: 'US/Mountain',
+  MDT: 'US/Mountain',
+  MT: 'US/Mountain',
+  'AMERICA/DENVER': 'US/Mountain',
+  'AMERICA/BOISE': 'US/Mountain',
+  PST: 'America/Los_Angeles',
+  PDT: 'America/Los_Angeles',
+  PT: 'America/Los_Angeles',
+  'US/PACIFIC': 'America/Los_Angeles',
+  'US/ALASKA': 'America/Anchorage',
+  'US/ARIZONA': 'America/Phoenix',
+  'US/HAWAII': 'Pacific/Honolulu',
+  HST: 'Pacific/Honolulu',
+  'AMERICA/BUENOS_AIRES': 'America/Argentina/Buenos_Aires',
+  'EUROPE/FRANKFURT': 'Europe/Berlin',
+  'ASIA/BEIJING': 'Asia/Shanghai',
+  'ASIA/CALCUTTA': 'Asia/Kolkata',
+  'ASIA/SAIGON': 'Asia/Ho_Chi_Minh',
+  'ASIA/RANGOON': 'Asia/Yangon',
+  'ASIA/KATMANDU': 'Asia/Kathmandu',
+  'AUSTRALIA/MELBOURNE': 'Australia/Sydney',
+}
+
+/**
  * What people call the indices, futures, and macro symbols, against the symbol TradingView charts
  * them under: 'S&P 500', 'SPX', and 'Dow' reach no chart on their own, since the widget wants an
  * exchange. Keys are the name with everything but letters and digits dropped, so case, spaces, '&',
@@ -132,6 +286,8 @@ export interface State {
   compare?: string[]
   /** Pre- and post-market bars, where the exchange has them. Absent means regular hours. */
   extendedHours?: boolean
+  /** Timezone for bar times. Absent means the instrument's exchange timezone. */
+  timezone?: Timezone
 }
 
 /** The latest quote the widget posted: the symbol it is showing and its price. */
@@ -171,6 +327,7 @@ export function readState(raw: unknown): State {
     // The main symbol drawn over itself is a line on a line.
     if (other !== '' && other !== symbol && !compare.includes(other)) compare.push(other)
   }
+  const timezone = resolveTimezone(state['timezone'])
   return {
     symbol,
     interval: INTERVALS.find((i) => i === state['interval']) ?? 'D',
@@ -179,6 +336,26 @@ export function readState(raw: unknown): State {
     studies: studies.slice(0, MAX_STUDIES),
     ...(compare.length ? { compare: compare.slice(0, MAX_COMPARE) } : {}),
     ...(state['extendedHours'] === true ? { extendedHours: true } : {}),
+    ...(timezone ? { timezone } : {}),
+  }
+}
+
+/**
+ * The timezone id TradingView's widget accepts for what was written, or undefined for the default
+ * exchange timezone (`null`, `''`, `'exchange'`, or an unrecognized zone).
+ */
+export function resolveTimezone(raw: unknown): Timezone | undefined {
+  if (typeof raw !== 'string') return undefined
+  const written = raw.trim().replace(/\s+/g, '_')
+  const key = written.toUpperCase()
+  if (key === '' || key === 'EXCHANGE') return undefined
+  const direct = TIMEZONE_BY_KEY.get(key) ?? TIMEZONE_ALIASES[key]
+  if (direct) return direct
+  try {
+    const canonical = new Intl.DateTimeFormat('en-US', { timeZone: written }).resolvedOptions().timeZone.toUpperCase()
+    return TIMEZONE_BY_KEY.get(canonical) ?? TIMEZONE_ALIASES[canonical]
+  } catch {
+    return undefined
   }
 }
 
@@ -212,6 +389,7 @@ export function widgetUrl(state: State, scheme: Scheme): string {
       ? { compareSymbols: state.compare.map((symbol) => ({ symbol, position: 'SameScale' })) }
       : {}),
     ...(state.extendedHours ? { extended_hours: true } : {}),
+    timezone: state.timezone ?? 'exchange',
     theme: scheme,
     autosize: true,
     allow_symbol_change: true,
@@ -264,6 +442,7 @@ export function summarize(state: unknown, output: unknown): string {
     ...chart.studies,
     ...(chart.compare ? [`vs ${chart.compare.join(' ')}`] : []),
     ...(chart.extendedHours ? ['extended hours'] : []),
+    ...(chart.timezone ? [chart.timezone] : []),
   ].join(', ')
 }
 

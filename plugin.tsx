@@ -1,7 +1,7 @@
 import { definePlugin, defineView } from '@jaspers-ai/sdk'
 import { z } from 'zod'
 import { ChartView } from './ChartView'
-import { INTERVALS, MAX_COMPARE, MAX_STUDIES, RANGES, STUDIES, STYLES, summarize, WIDGET_ORIGIN } from './chart'
+import { INTERVALS, MAX_COMPARE, MAX_STUDIES, RANGES, STUDIES, STYLES, summarize, TIMEZONES, WIDGET_ORIGIN } from './chart'
 import { INSTRUCTIONS } from './instructions'
 
 // TradingView's advanced chart widget as a view. TradingView draws it, with its own data, on its
@@ -26,6 +26,13 @@ const StateSchema = z.object({
     .optional()
     .describe('Up to three symbols drawn over the main one in its pane, named the same way; null clears them.'),
   extendedHours: z.boolean().nullable().optional().describe('Pre- and post-market bars, where the exchange has them; null or false is regular hours.'),
+  timezone: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      "Timezone for bar times, such as America/New_York, America/Chicago, Europe/London, Asia/Tokyo, or Etc/UTC; omitted, null, or 'exchange' uses the instrument's exchange timezone.",
+    ),
 })
 
 const QuoteSchema = z.object({
@@ -46,6 +53,7 @@ const OutputSchema = z.object({
   studies: z.array(z.enum(STUDIES)),
   compare: z.array(z.string()).optional(),
   extendedHours: z.boolean().optional(),
+  timezone: z.enum(TIMEZONES).optional(),
   quote: QuoteSchema.optional(),
 })
 
