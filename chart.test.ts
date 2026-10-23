@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { MAX_COMPARE, nextQuote, QUOTE_EVERY_MS, type Quote, readQuote, readState, resolveSymbol, type State, summarize, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
+import { MAX_COMPARE, nextQuote, QUOTE_EVERY_MS, type Quote, readQuote, readState, resolveSymbol, resolveTimezone, type State, summarize, TIMEZONES, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
+import { INSTRUCTIONS } from './instructions.ts'
 
 // The plugin's pure half: the state a panel holds read the forgiving way, the widget's address,
 // the quotes the widget posts, how often one is published, and the line the model's map carries.
@@ -97,6 +98,70 @@ test('extended hours is on only when it is asked for', () => {
   assert.equal(readState({ symbol: 'AAPL' }).extendedHours, undefined)
 })
 
+test('a timezone TradingView offers, or a common name for one, resolves to the widget id', () => {
+  assert.equal(TIMEZONES.length, 98)
+  for (const tz of TIMEZONES) {
+    assert.equal(resolveTimezone(tz), tz)
+  }
+  assert.equal(resolveTimezone('America/New_York'), 'America/New_York')
+  assert.equal(resolveTimezone(' america/new_york '), 'America/New_York')
+  assert.equal(resolveTimezone('America/New York'), 'America/New_York')
+  assert.equal(resolveTimezone('Europe/London'), 'Europe/London')
+  assert.equal(resolveTimezone('Asia/Tokyo'), 'Asia/Tokyo')
+  assert.equal(resolveTimezone('Etc/UTC'), 'Etc/UTC')
+  assert.equal(resolveTimezone('UTC'), 'Etc/UTC')
+  assert.equal(resolveTimezone('gmt'), 'Etc/UTC')
+  assert.equal(resolveTimezone('EST'), 'America/New_York')
+  assert.equal(resolveTimezone('EDT'), 'America/New_York')
+  assert.equal(resolveTimezone('ET'), 'America/New_York')
+  assert.equal(resolveTimezone('US/Eastern'), 'America/New_York')
+  assert.equal(resolveTimezone('America/Detroit'), 'America/New_York')
+  assert.equal(resolveTimezone('America/Indianapolis'), 'America/New_York')
+  assert.equal(resolveTimezone('CST'), 'America/Chicago')
+  assert.equal(resolveTimezone('CDT'), 'America/Chicago')
+  assert.equal(resolveTimezone('CT'), 'America/Chicago')
+  assert.equal(resolveTimezone('US/Central'), 'America/Chicago')
+  assert.equal(resolveTimezone('MST'), 'US/Mountain')
+  assert.equal(resolveTimezone('MDT'), 'US/Mountain')
+  assert.equal(resolveTimezone('MT'), 'US/Mountain')
+  assert.equal(resolveTimezone('America/Denver'), 'US/Mountain')
+  assert.equal(resolveTimezone('PST'), 'America/Los_Angeles')
+  assert.equal(resolveTimezone('PDT'), 'America/Los_Angeles')
+  assert.equal(resolveTimezone('PT'), 'America/Los_Angeles')
+  assert.equal(resolveTimezone('US/Pacific'), 'America/Los_Angeles')
+  assert.equal(resolveTimezone('Europe/Frankfurt'), 'Europe/Berlin')
+  assert.equal(resolveTimezone('Asia/Beijing'), 'Asia/Shanghai')
+  assert.equal(resolveTimezone('Australia/Melbourne'), 'Australia/Sydney')
+  assert.equal(resolveTimezone('Asia/Calcutta'), 'Asia/Kolkata')
+  assert.equal(resolveTimezone('Japan'), 'Asia/Tokyo')
+  assert.equal(readState({ symbol: 'AAPL', timezone: 'America/New_York' }).timezone, 'America/New_York')
+  assert.equal(readState({ symbol: 'AAPL', timezone: 'est' }).timezone, 'America/New_York')
+})
+
+test('an unset, exchange, cleared, or unknown timezone leaves the chart on the exchange timezone', () => {
+  assert.equal(resolveTimezone(undefined), undefined)
+  assert.equal(resolveTimezone(null), undefined)
+  assert.equal(resolveTimezone(''), undefined)
+  assert.equal(resolveTimezone('   '), undefined)
+  assert.equal(resolveTimezone('exchange'), undefined)
+  assert.equal(resolveTimezone('EXCHANGE'), undefined)
+  assert.equal(resolveTimezone('Mars/Olympus'), undefined)
+  assert.equal(resolveTimezone(7), undefined)
+  assert.equal(readState({ symbol: 'AAPL' }).timezone, undefined)
+  assert.equal(readState({ symbol: 'AAPL', timezone: null }).timezone, undefined)
+  assert.equal(readState({ symbol: 'AAPL', timezone: '' }).timezone, undefined)
+  assert.equal(readState({ symbol: 'AAPL', timezone: 'exchange' }).timezone, undefined)
+  assert.equal(readState({ symbol: 'AAPL', timezone: 'Mars/Olympus' }).timezone, undefined)
+  assert.equal(readState({ symbol: 'AAPL', timezone: 7 }).timezone, undefined)
+  const ny = widgetUrl(readState({ symbol: 'NASDAQ:AAPL', timezone: 'America/New_York' }), 'dark')
+  const exchange = widgetUrl(readState({ symbol: 'NASDAQ:AAPL', timezone: 'exchange' }), 'dark')
+  const invalid = widgetUrl(readState({ symbol: 'NASDAQ:AAPL', timezone: 'Mars/Olympus' }), 'dark')
+  assert.notEqual(ny, exchange)
+  assert.equal(invalid, exchange)
+  assert.equal(JSON.parse(decodeURIComponent(new URL(ny).hash.slice(1))).timezone, 'America/New_York')
+  assert.equal(JSON.parse(decodeURIComponent(new URL(exchange).hash.slice(1))).timezone, 'exchange')
+})
+
 test('the widget address is the advanced chart page with the chart in its hash', () => {
   const url = new URL(widgetUrl({ symbol: 'NASDAQ:AAPL', interval: 'D', style: 'candles', studies: [] }, 'light'))
   assert.equal(url.origin, WIDGET_ORIGIN)
@@ -107,6 +172,7 @@ test('the widget address is the advanced chart page with the chart in its hash',
     interval: 'D',
     style: '1',
     studies: [],
+    timezone: 'exchange',
     theme: 'light',
     autosize: true,
     allow_symbol_change: true,
@@ -175,4 +241,12 @@ test('the summary names the symbol, its price once there is one, and how it is d
   assert.equal(summarize({ symbol: 'NASDAQ:MSFT' }, { quote: { name: 'MSFT', last: 495.84, changePercent: -0.194 } }), 'Chart: MSFT 495.84 -0.19%, D, candles')
   assert.equal(summarize({ symbol: 'NASDAQ:MSFT' }, { quote: { name: 'MSFT', last: 495.84 } }), 'Chart: MSFT 495.84, D, candles')
   assert.equal(summarize({ symbol: 'S&P 500', compare: ['gold'], extendedHours: true }, {}), 'Chart: SP:SPX, D, candles, vs TVC:GOLD, extended hours')
+  assert.equal(summarize({ symbol: 'NASDAQ:AAPL', interval: '5', timezone: 'America/New_York' }, {}), 'Chart: NASDAQ:AAPL, 5, candles, America/New_York')
+  assert.equal(summarize({ symbol: 'NASDAQ:AAPL', timezone: 'exchange' }, {}), 'Chart: NASDAQ:AAPL, D, candles')
+})
+
+test('the instructions tell the assistant how to set and clear state.timezone', () => {
+  assert.match(INSTRUCTIONS, /state\.timezone/)
+  assert.match(INSTRUCTIONS, /America\/New_York/)
+  assert.match(INSTRUCTIONS, /exchange/)
 })
