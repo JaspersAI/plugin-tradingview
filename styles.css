@@ -1,24 +1,104 @@
-/* The chart's own CSS: TradingView's frame filling the element, and one quiet line under it crediting
-   TradingView. The house style by hand: square, one grey line, muted text. Colours are the app's theme
-   variables, so the view follows its light and dark, each with its light value as the fallback for an
-   app from before the theme. */
+/* The chart's own CSS: TradingView's frame filling the element, with a compact single-line header bar
+   when the pane is too narrow or short for TradingView's own toolbar and floating legend to fit. The
+   house style by hand: square, one grey line, muted text. Colours are the app's theme variables, so
+   the view follows its light and dark, each with its light value as the fallback for an app from
+   before the theme. */
 
 .tv-root {
   display: flex;
   flex-direction: column;
   height: 100%;
   width: 100%;
+  overflow: hidden;
   background: var(--jaspers-background, #fff);
   color: var(--jaspers-foreground, #171717);
   font: 13px/1.45 var(--jaspers-font-sans, system-ui, -apple-system, sans-serif);
 }
 
-.tv-frame {
-  display: block;
+.tv-bar {
+  flex: 0 0 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--jaspers-border, #e5e5e5);
+  background: var(--jaspers-background, #fff);
+  font-size: 11px;
+  line-height: 16px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tv-bar-title {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tv-bar-symbol {
+  font-weight: 600;
+  color: var(--jaspers-foreground, #171717);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tv-bar-period {
+  flex: 0 0 auto;
+  color: var(--jaspers-muted-foreground, #737373);
+}
+
+.tv-bar-quote {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-bar-price {
+  color: var(--jaspers-foreground, #171717);
+}
+
+.tv-bar-change {
+  color: var(--jaspers-muted-foreground, #737373);
+}
+
+.tv-bar-up {
+  color: var(--jaspers-positive, #15803d);
+}
+
+.tv-bar-down {
+  color: var(--jaspers-negative, #b91c1c);
+}
+
+@media (prefers-color-scheme: dark) {
+  .tv-bar-up {
+    color: var(--jaspers-positive, #4ade80);
+  }
+
+  .tv-bar-down {
+    color: var(--jaspers-negative, #f87171);
+  }
+}
+
+.tv-stage {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
+  overflow: hidden;
+}
+
+.tv-frame {
+  display: block;
+  height: 100%;
+  width: 100%;
   border: 0;
+  transform-origin: 0 0;
 }
 
 .tv-empty {

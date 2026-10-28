@@ -275,6 +275,95 @@ export const MAX_COMPARE = 3
 /** How often a price that keeps moving is published: every publish is a push of the whole app state. */
 export const QUOTE_EVERY_MS = 15_000
 
+/** Below this width or height, TradingView's toolbar, floating legend, and volume study clip or overlap the plot. */
+export const COMPACT_WIDTH = 380
+export const COMPACT_HEIGHT = 240
+
+/** Height of the single-line header bar shown above a compact chart frame. */
+export const COMPACT_BAR_HEIGHT = 22
+
+/**
+ * TradingView's embed stylesheet enforces `min-width: 240px` on `html, body` and its chart layout
+ * uses a 300 px minimum width (`MinChartWidth`), so an iframe narrower than this clips its right
+ * price axis. Compact frames below these dimensions are laid out at least this large and scaled
+ * down to fit the sub-pane.
+ */
+export const MIN_FRAME_WIDTH = 300
+export const MIN_FRAME_HEIGHT = 180
+
+export interface FrameLayout {
+  compact: boolean
+  /** CSS width in px when scaled (`scale < 1`), or undefined for `100%`. */
+  width?: number
+  /** CSS height in px when scaled (`scale < 1`), or undefined for `100%`. */
+  height?: number
+  /** Scale factor applied with `transform: scale(...)` when the stage is smaller than the widget's minimum. */
+  scale: number
+}
+
+export interface CompactBar {
+  /** Short ticker for the compact bar, such as AAPL for NASDAQ:AAPL. */
+  symbol: string
+  /** Range when set, else interval, such as 12M or D. */
+  period: string
+  /** Latest price from the widget once a quote has arrived. */
+  price?: string
+  /** Signed percentage change, such as +1.75% or -0.19%. */
+  change?: string
+  /** Sign of the change for colouring: up, down, or flat. */
+  tone?: 'up' | 'down' | 'flat'
+}
+
+/**
+ * Whether a chart's frame is too narrow or too short for TradingView's top toolbar, floating
+ * OHLC/volume legend, and volume study to fit without clipping or covering the plot.
+ */
+export function isCompact(width: number, height: number): boolean {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false
+  return width < COMPACT_WIDTH || height < COMPACT_HEIGHT
+}
+
+/**
+ * How the widget's iframe is sized inside its pane: full-sized when the pane has room, compact with
+ * a single-line header bar when narrow or short, and scaled down when the stage under that bar is
+ * smaller than TradingView's minimum chart dimensions (`MinChartWidth` / `min-width: 240px`).
+ */
+export function frameLayout(width: number, height: number): FrameLayout {
+  const compact = isCompact(width, height)
+  if (!compact) return { compact: false, scale: 1 }
+  const stageWidth = width
+  const stageHeight = Math.max(1, height - COMPACT_BAR_HEIGHT)
+  const scale = Math.min(1, stageWidth / MIN_FRAME_WIDTH, stageHeight / MIN_FRAME_HEIGHT)
+  if (scale >= 1) return { compact: true, scale: 1 }
+  return {
+    compact: true,
+    width: Math.round(stageWidth / scale),
+    height: Math.round(stageHeight / scale),
+    scale: Number(scale.toFixed(4)),
+  }
+}
+
+/**
+ * What the single-line header bar above a compact chart shows: the short ticker, the active range or
+ * interval, and the latest price and percent change once the widget has posted a quote.
+ */
+export function compactBar(state: State, quote: Quote | null): CompactBar {
+  const short = state.symbol.includes(':') ? (state.symbol.split(':').at(-1) || state.symbol) : state.symbol
+  const symbol = quote?.name || short
+  const period = state.range ?? state.interval
+  if (!quote) return { symbol, period }
+  const change = percent(quote.changePercent)
+  const delta = quote.changePercent ?? quote.change
+  const tone: 'up' | 'down' | 'flat' =
+    delta === undefined || delta === 0 ? 'flat' : delta > 0 ? 'up' : 'down'
+  return {
+    symbol,
+    period,
+    price: String(quote.last),
+    ...(change ? { change, tone } : {}),
+  }
+}
+
 export interface State {
   /** EXCHANGE:TICKER, like NASDAQ:AAPL, once resolved. Empty until one is set. */
   symbol: string
@@ -375,8 +464,10 @@ export function resolveSymbol(raw: unknown): string {
  * The widget's page for a chart, built the way TradingView's embed script builds it: the locale in
  * the query, and the chart as JSON in the hash, so changing the chart is loading another address.
  * Its theme is the app's scheme, in the hash like the rest, so light and dark are two addresses.
+ * In a compact pane (`compact`), the widget's top toolbar, floating OHLC/volume legend, and default
+ * volume study are hidden so they do not clip on the right or overlap the candlestick plot.
  */
-export function widgetUrl(state: State, scheme: Scheme): string {
+export function widgetUrl(state: State, scheme: Scheme, compact = false): string {
   const chart = {
     symbol: state.symbol,
     interval: state.interval,
@@ -389,6 +480,7 @@ export function widgetUrl(state: State, scheme: Scheme): string {
       ? { compareSymbols: state.compare.map((symbol) => ({ symbol, position: 'SameScale' })) }
       : {}),
     ...(state.extendedHours ? { extended_hours: true } : {}),
+    ...(compact ? { hide_top_toolbar: true, hide_legend: true, hide_volume: true } : {}),
     timezone: state.timezone ?? 'exchange',
     theme: scheme,
     autosize: true,

@@ -1,6 +1,28 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { MAX_COMPARE, nextQuote, QUOTE_EVERY_MS, type Quote, readQuote, readState, resolveSymbol, resolveTimezone, type State, summarize, TIMEZONES, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
+import {
+  COMPACT_BAR_HEIGHT,
+  COMPACT_HEIGHT,
+  COMPACT_WIDTH,
+  compactBar,
+  frameLayout,
+  isCompact,
+  MAX_COMPARE,
+  MIN_FRAME_HEIGHT,
+  MIN_FRAME_WIDTH,
+  nextQuote,
+  QUOTE_EVERY_MS,
+  type Quote,
+  readQuote,
+  readState,
+  resolveSymbol,
+  resolveTimezone,
+  type State,
+  summarize,
+  TIMEZONES,
+  WIDGET_ORIGIN,
+  widgetUrl,
+} from './chart.ts'
 import { INSTRUCTIONS } from './instructions.ts'
 
 // The plugin's pure half: the state a panel holds read the forgiving way, the widget's address,
@@ -250,3 +272,92 @@ test('the instructions tell the assistant how to set and clear state.timezone', 
   assert.match(INSTRUCTIONS, /America\/New_York/)
   assert.match(INSTRUCTIONS, /exchange/)
 })
+
+test('a narrow or short pane is compact, and a full-sized or unmeasured one is not', () => {
+  assert.equal(isCompact(225, 170), true)
+  assert.equal(isCompact(COMPACT_WIDTH - 1, 400), true)
+  assert.equal(isCompact(680, COMPACT_HEIGHT - 1), true)
+  assert.equal(isCompact(COMPACT_WIDTH, COMPACT_HEIGHT), false)
+  assert.equal(isCompact(680, 450), false)
+  assert.equal(isCompact(0, 0), false)
+  assert.equal(isCompact(-10, 200), false)
+  assert.equal(isCompact(Number.NaN, 200), false)
+})
+
+test('a compact chart hides the widget top toolbar, floating legend, and volume study', () => {
+  const state: State = { symbol: 'NASDAQ:CORT', interval: 'D', style: 'candles', studies: [] }
+  const full = JSON.parse(decodeURIComponent(new URL(widgetUrl(state, 'light', false)).hash.slice(1)))
+  assert.equal('hide_top_toolbar' in full, false)
+  assert.equal('hide_legend' in full, false)
+  assert.equal('hide_volume' in full, false)
+
+  const compact = JSON.parse(decodeURIComponent(new URL(widgetUrl(state, 'light', true)).hash.slice(1)))
+  assert.equal(compact.hide_top_toolbar, true)
+  assert.equal(compact.hide_legend, true)
+  assert.equal(compact.hide_volume, true)
+})
+
+test('a compact sub-pane narrower than the widget minimum scales its frame so the right axis never clips', () => {
+  assert.deepEqual(frameLayout(680, 450), { compact: false, scale: 1 })
+  assert.deepEqual(frameLayout(0, 0), { compact: false, scale: 1 })
+  // Narrow enough to be compact (< 380 px), but at least MIN_FRAME_WIDTH × MIN_FRAME_HEIGHT after the bar.
+  assert.deepEqual(frameLayout(340, 260), { compact: true, scale: 1 })
+
+  // Three side-by-side charts in a half-width 3-row tile (~225 × 172 px).
+  const sub = frameLayout(225, 172)
+  assert.equal(sub.compact, true)
+  assert.ok(sub.scale < 1)
+  assert.equal(sub.width, MIN_FRAME_WIDTH)
+  assert.equal(sub.height, Math.round((172 - COMPACT_BAR_HEIGHT) / sub.scale))
+  assert.ok((sub.width ?? 0) >= MIN_FRAME_WIDTH)
+  assert.ok((sub.height ?? 0) >= MIN_FRAME_HEIGHT)
+})
+
+test('the compact bar shows the short symbol, active period, and latest quote with its sign', () => {
+  const state = readState({ symbol: 'NASDAQ:CORT', interval: 'D' })
+  assert.deepEqual(compactBar(state, null), { symbol: 'CORT', period: 'D' })
+  assert.deepEqual(
+    compactBar(readState({ symbol: 'KNSA', range: '12M' }), {
+      name: 'KNSA',
+      last: 89.2,
+      change: 16.22,
+      changePercent: 22.234,
+    }),
+    {
+      symbol: 'KNSA',
+      period: '12M',
+      price: '89.2',
+      change: '+22.23%',
+      tone: 'up',
+    },
+  )
+  assert.deepEqual(
+    compactBar(readState({ symbol: 'NASDAQ:MSFT' }), {
+      name: 'MSFT',
+      last: 495.84,
+      changePercent: -0.194,
+    }),
+    {
+      symbol: 'MSFT',
+      period: 'D',
+      price: '495.84',
+      change: '-0.19%',
+      tone: 'down',
+    },
+  )
+  assert.deepEqual(
+    compactBar(readState({ symbol: 'MIRM' }), {
+      name: 'MIRM',
+      last: 85.56,
+      changePercent: 0,
+    }),
+    {
+      symbol: 'MIRM',
+      period: 'D',
+      price: '85.56',
+      change: '0.00%',
+      tone: 'flat',
+    },
+  )
+})
+
