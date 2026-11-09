@@ -7,24 +7,32 @@ import {
 } from "react";
 import { useBridge, useData, usePublish, type PanelRef } from "@jaspers-ai/sdk";
 import {
+  applyWidgetUpdate,
+  frameKey,
+  isWidgetReady,
   nextQuote,
   QUOTE_EVERY_MS,
   readQuote,
   readState,
+  readSymbolInfo,
+  syncLiveChart,
   WIDGET_ORIGIN,
-  widgetUrl,
+  widgetRequest,
+  type LiveChart,
   type Quote,
   type Scheme,
+  type State,
 } from "./chart";
 import "./styles.css";
 
 // The view: TradingView's widget in a frame, at the address the panel's state makes, so changing the
-// state loads another chart. The widget posts quotes to this page; the latest goes out with the state
-// as the output, which is everything the orchestrator can know about what is drawn. The address also
-// carries the app's light or dark, so a switch loads the chart again in the other.
+// state loads another chart. The widget posts quotes and symbolInfo to this page; interactive symbol
+// and interval changes in the widget persist back to panel.state without reloading the frame, and the
+// latest state and quote go out as the output. The address also carries the app's light or dark, so a
+// switch loads the chart again in the other.
 
-/** Where the credit under the chart goes. */
-const TRADINGVIEW = "https://www.tradingview.com/";
+/** How often the mounted widget is polled for interval/symbol changes when quotes are quiet. */
+const SYMBOL_INFO_POLL_MS = 2_000;
 
 /**
  * The panel's state arrives a round trip after the frame mounts. Until it does there is no chart to
@@ -54,24 +62,71 @@ function Chart({
   const bridge = useBridge();
   const scheme = useColorScheme();
   const state = readState(raw);
-  const url = state.symbol ? widgetUrl(state, scheme) : null;
+  const liveRef = useRef<LiveChart | null>(null);
+  const prevPropStateRef = useRef<State | null>(null);
+  const live = syncLiveChart(
+    liveRef.current,
+    prevPropStateRef.current,
+    state,
+    scheme,
+  );
+  liveRef.current = live;
+  prevPropStateRef.current = state;
+  const url = live?.url ?? null;
+  const key = live ? frameKey(live) : null;
+  const activeState = live?.state ?? state;
+
   const frame = useRef<HTMLIFrameElement>(null);
+  const ready = useRef(false);
+  const reqId = useRef(0);
   const latest = useRef<Quote | null>(null);
   const shown = useRef<{ quote: Quote | null; at: number }>({
     quote: null,
     at: 0,
   });
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [, setVersion] = useState(0);
 
   // Another address is another chart, or the same one loaded again in the other scheme: either way
   // what the last page said about its price no longer holds.
   useEffect(() => {
+    ready.current = false;
     latest.current = null;
     shown.current = { quote: null, at: 0 };
     setQuote(null);
-  }, [url]);
+  }, [key]);
 
   useEffect(() => {
+    function askSymbolInfo(): void {
+      if (!ready.current) return;
+      frame.current?.contentWindow?.postMessage(
+        widgetRequest("symbolInfo", ++reqId.current),
+        WIDGET_ORIGIN,
+      );
+    }
+    function syncFromWidget(update: {
+      symbol?: string;
+      interval?: LiveChart["state"]["interval"];
+    }): void {
+      if (!liveRef.current) return;
+      const { live: nextLive, patch } = applyWidgetUpdate(
+        liveRef.current,
+        prevPropStateRef.current ?? liveRef.current.state,
+        update,
+      );
+      liveRef.current = nextLive;
+      if (!patch) return;
+      setVersion((v) => v + 1);
+      if (patch.symbol !== undefined) {
+        void bridge.setState(panel, ["symbol"], patch.symbol);
+      }
+      if (patch.interval !== undefined) {
+        void bridge.setState(panel, ["interval"], patch.interval);
+      }
+      if (patch.range !== undefined) {
+        void bridge.setState(panel, ["range"], patch.range);
+      }
+    }
     function offer(): void {
       const now = Date.now();
       const next = nextQuote(
@@ -91,32 +146,54 @@ function Chart({
         event.source !== frame.current?.contentWindow
       )
         return;
+      if (isWidgetReady(event.data)) {
+        ready.current = true;
+        askSymbolInfo();
+        return;
+      }
+      const info = readSymbolInfo(event.data);
+      if (info) {
+        ready.current = true;
+        syncFromWidget({ symbol: info.name, interval: info.interval });
+        return;
+      }
       const posted = readQuote(event.data);
       if (!posted) return;
+      ready.current = true;
       latest.current = posted;
+      syncFromWidget({ symbol: posted.name });
+      askSymbolInfo();
       offer();
     }
     window.addEventListener("message", onMessage);
     // A price that moved inside the interval goes out once the interval has passed, quote or no quote.
-    const timer = setInterval(offer, QUOTE_EVERY_MS);
+    const quoteTimer = setInterval(offer, QUOTE_EVERY_MS);
+    const infoTimer = setInterval(askSymbolInfo, SYMBOL_INFO_POLL_MS);
     return () => {
       window.removeEventListener("message", onMessage);
-      clearInterval(timer);
+      clearInterval(quoteTimer);
+      clearInterval(infoTimer);
     };
-  }, []);
+  }, [bridge, panel]);
 
-  usePublish(panel, quote ? { ...state, quote } : { ...state });
+  usePublish(panel, quote ? { ...activeState, quote } : { ...activeState });
 
   return (
     <div className="tv-root">
-      {url ? (
-        // Keyed on the address: the widget reads its chart from the hash once, so a new one is a new page.
+      {url && key ? (
+        // Keyed on the live chart revision and address: the widget reads its chart from the hash once, so a new one is a new page.
         <iframe
-          key={url}
+          key={key}
           ref={frame}
           className="tv-frame"
           src={url}
-          title={`${state.symbol} chart`}
+          title={`${activeState.symbol} chart`}
+          onLoad={() => {
+            frame.current?.contentWindow?.postMessage(
+              widgetRequest("widgetReady", ++reqId.current),
+              WIDGET_ORIGIN,
+            );
+          }}
         />
       ) : (
         <p className="tv-empty">No symbol set.</p>

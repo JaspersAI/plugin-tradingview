@@ -308,6 +308,169 @@ export interface Output extends State {
 /** The app's light or dark, which the widget draws in. The view reads it from its page; a panel's state never holds it. */
 export type Scheme = 'light' | 'dark'
 
+export interface SymbolInfo {
+  name: string
+  exchange?: string
+  description?: string
+  interval?: Interval
+}
+
+export interface LiveChart {
+  url: string
+  revision: number
+  state: State
+  scheme: Scheme
+  widgetInterval?: Interval
+}
+
+export function frameKey(live: LiveChart): string {
+  return `${live.revision}:${live.url}`
+}
+
+export type StatePatch = Partial<{
+  symbol: string
+  interval: Interval
+  range: Range | null
+}>
+
+/** Builds a TradingView message-service `get` payload to query `widgetReady` or `symbolInfo`. */
+export function widgetRequest(name: 'widgetReady' | 'symbolInfo', id: number): string {
+  return JSON.stringify({
+    id,
+    type: 'get',
+    name,
+    client_id: 'jaspers',
+    data: null,
+    provider: 'TradingView',
+  })
+}
+
+/** Whether a postMessage payload is the widget's `widgetReady` reply. */
+export function isWidgetReady(message: unknown): boolean {
+  const post = record(typeof message === 'string' ? parseJson(message) : message)
+  return post?.['type'] === 'on' && post?.['name'] === 'widgetReady'
+}
+
+/** A `symbolInfo` reply from the widget, or null for any other message. */
+export function readSymbolInfo(message: unknown): SymbolInfo | null {
+  const post = record(typeof message === 'string' ? parseJson(message) : message)
+  const data = post?.['type'] === 'on' && post?.['name'] === 'symbolInfo' ? record(post['data']) : null
+  if (!data) return null
+  const name = text(data['name'])
+  if (name === undefined) return null
+  const interval = INTERVALS.find((i) => i === data['interval'])
+  return defined({
+    name,
+    exchange: text(data['exchange']),
+    description: text(data['description']),
+    interval,
+  })
+}
+
+/**
+ * Reconciles the live iframe with the latest `panel.state` and color scheme. Keeps the mounted
+ * iframe URL stable while interactive symbol/interval edits made inside the widget settle into
+ * `panel.state`, and loads a new URL whenever `panel.state` or the scheme changes from outside.
+ */
+export function syncLiveChart(
+  live: LiveChart | null,
+  prevPropState: State | null,
+  nextPropState: State,
+  scheme: Scheme,
+): LiveChart | null {
+  if (!nextPropState.symbol) return null
+  if (!live || live.scheme !== scheme || prevPropState === null) {
+    return {
+      url: widgetUrl(nextPropState, scheme),
+      revision: (live?.revision ?? 0) + 1,
+      state: nextPropState,
+      scheme,
+    }
+  }
+  const externalSymbolChange =
+    nextPropState.symbol !== prevPropState.symbol && nextPropState.symbol !== live.state.symbol
+  const externalIntervalChange =
+    nextPropState.interval !== prevPropState.interval && nextPropState.interval !== live.state.interval
+  const externalRangeChange = nextPropState.range !== prevPropState.range && nextPropState.range !== live.state.range
+  const otherChanged =
+    nextPropState.style !== live.state.style ||
+    JSON.stringify(nextPropState.studies) !== JSON.stringify(live.state.studies) ||
+    JSON.stringify(nextPropState.compare) !== JSON.stringify(live.state.compare) ||
+    nextPropState.extendedHours !== live.state.extendedHours ||
+    nextPropState.timezone !== live.state.timezone
+  if (externalSymbolChange || externalIntervalChange || externalRangeChange || otherChanged) {
+    return {
+      url: widgetUrl(nextPropState, scheme),
+      revision: live.revision + 1,
+      state: nextPropState,
+      scheme,
+    }
+  }
+  return live
+}
+
+/**
+ * Applies a symbol or interval reported by the live widget, returning the updated `LiveChart`
+ * (with its URL preserved so the iframe does not reload) and the `panel.state` patch to persist.
+ */
+export function applyWidgetUpdate(
+  live: LiveChart,
+  propState: State,
+  update: { symbol?: string; interval?: Interval },
+): { live: LiveChart; patch: StatePatch | null } {
+  const patch: StatePatch = {}
+  let nextState = live.state
+  let widgetInterval = live.widgetInterval
+
+  const rawSymbol = typeof update.symbol === 'string' ? update.symbol.trim().toUpperCase() : ''
+  if (rawSymbol !== '' && !sameSymbol(nextState.symbol, rawSymbol)) {
+    const nextSymbol = resolveSymbol(rawSymbol)
+    if (nextSymbol !== '' && !sameSymbol(nextState.symbol, nextSymbol)) {
+      nextState = { ...nextState, symbol: nextSymbol }
+      patch.symbol = nextSymbol
+    }
+  }
+
+  if (update.interval !== undefined) {
+    if (widgetInterval === undefined) {
+      widgetInterval = update.interval
+      if (!nextState.range && update.interval !== nextState.interval) {
+        nextState = { ...nextState, interval: update.interval }
+        patch.interval = update.interval
+      }
+    } else if (update.interval !== widgetInterval) {
+      widgetInterval = update.interval
+      const hadRange = nextState.range !== undefined || propState.range !== undefined
+      const { range: _, ...withoutRange } = nextState
+      nextState = { ...withoutRange, interval: update.interval }
+      patch.interval = update.interval
+      if (hadRange) patch.range = null
+    }
+  }
+
+  const nextLive: LiveChart = {
+    ...live,
+    state: nextState,
+    ...(widgetInterval !== undefined ? { widgetInterval } : {}),
+  }
+  return {
+    live: nextLive,
+    patch: Object.keys(patch).length > 0 ? patch : null,
+  }
+}
+
+function sameSymbol(a: string, b: string): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return tickerOf(a) === tickerOf(b)
+}
+
+function tickerOf(symbol: string): string {
+  const clean = symbol.trim().toUpperCase()
+  const idx = clean.lastIndexOf(':')
+  return idx === -1 ? clean : clean.slice(idx + 1)
+}
+
 /**
  * The panel's state with its defaults, read the forgiving way: main checks what is written against
  * the schema, but stores it as written, so a key that was never set is simply not there.
