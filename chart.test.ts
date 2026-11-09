@@ -1,6 +1,25 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { MAX_COMPARE, nextQuote, QUOTE_EVERY_MS, type Quote, readQuote, readState, resolveSymbol, resolveTimezone, type State, summarize, TIMEZONES, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
+import {
+  applyWidgetUpdate,
+  isWidgetReady,
+  MAX_COMPARE,
+  nextQuote,
+  QUOTE_EVERY_MS,
+  type Quote,
+  readQuote,
+  readState,
+  readSymbolInfo,
+  resolveSymbol,
+  resolveTimezone,
+  type State,
+  summarize,
+  syncLiveChart,
+  TIMEZONES,
+  WIDGET_ORIGIN,
+  widgetRequest,
+  widgetUrl,
+} from './chart.ts'
 import { INSTRUCTIONS } from './instructions.ts'
 
 // The plugin's pure half: the state a panel holds read the forgiving way, the widget's address,
@@ -249,4 +268,142 @@ test('the instructions tell the assistant how to set and clear state.timezone', 
   assert.match(INSTRUCTIONS, /state\.timezone/)
   assert.match(INSTRUCTIONS, /America\/New_York/)
   assert.match(INSTRUCTIONS, /exchange/)
+})
+
+test('widgetReady and symbolInfo messages are requested and read in TradingView postMessage format', () => {
+  assert.deepEqual(JSON.parse(widgetRequest('widgetReady', 1)), {
+    id: 1,
+    type: 'get',
+    name: 'widgetReady',
+    client_id: 'jaspers',
+    data: null,
+    provider: 'TradingView',
+  })
+  assert.deepEqual(JSON.parse(widgetRequest('symbolInfo', 2)), {
+    id: 2,
+    type: 'get',
+    name: 'symbolInfo',
+    client_id: 'jaspers',
+    data: null,
+    provider: 'TradingView',
+  })
+  assert.equal(isWidgetReady(JSON.stringify({ id: 1, type: 'on', name: 'widgetReady', provider: 'TradingView' })), true)
+  assert.equal(isWidgetReady({ id: 1, type: 'on', name: 'widgetReady', provider: 'TradingView' }), true)
+  assert.equal(isWidgetReady(QUOTE_UPDATE), false)
+
+  const infoMsg = {
+    id: 2,
+    type: 'on',
+    name: 'symbolInfo',
+    client_id: 'jaspers',
+    data: { name: 'NVDA', exchange: 'NASDAQ', description: 'NVIDIA Corp', interval: '15' },
+    provider: 'TradingView',
+  }
+  assert.deepEqual(readSymbolInfo(infoMsg), {
+    name: 'NVDA',
+    exchange: 'NASDAQ',
+    description: 'NVIDIA Corp',
+    interval: '15',
+  })
+  assert.deepEqual(readSymbolInfo(JSON.stringify(infoMsg)), {
+    name: 'NVDA',
+    exchange: 'NASDAQ',
+    description: 'NVIDIA Corp',
+    interval: '15',
+  })
+  assert.equal(readSymbolInfo(QUOTE_UPDATE), null)
+})
+
+test('interactive symbol and interval changes in the widget persist to state without reloading the iframe', () => {
+  const initial = readState({ symbol: 'NASDAQ:FLWS', interval: 'D' })
+  let live = syncLiveChart(null, null, initial, 'dark')
+  assert.ok(live)
+  const initialUrl = live.url
+
+  // Initial quote for the loaded symbol (FLWS) does not patch state or change the URL.
+  const firstQuote = applyWidgetUpdate(live, initial, { symbol: 'FLWS' })
+  assert.equal(firstQuote.patch, null)
+  assert.equal(firstQuote.live.url, initialUrl)
+  assert.equal(firstQuote.live.state.symbol, 'NASDAQ:FLWS')
+
+  // Initial symbolInfo for the loaded symbol records the widget interval without patching state.
+  const firstInfo = applyWidgetUpdate(firstQuote.live, initial, { symbol: 'FLWS', interval: 'D' })
+  assert.equal(firstInfo.patch, null)
+  assert.equal(firstInfo.live.url, initialUrl)
+
+  // User changes symbol to NVDA in the widget header bar.
+  const symbolChanged = applyWidgetUpdate(firstInfo.live, initial, { symbol: 'NVDA' })
+  assert.deepEqual(symbolChanged.patch, { symbol: 'NVDA' })
+  assert.equal(symbolChanged.live.url, initialUrl)
+  assert.equal(symbolChanged.live.state.symbol, 'NVDA')
+
+  // Re-render while panel.state write is still in flight keeps the live chart and URL intact.
+  live = syncLiveChart(symbolChanged.live, initial, initial, 'dark')
+  assert.ok(live)
+  assert.equal(live.url, initialUrl)
+  assert.equal(live.state.symbol, 'NVDA')
+
+  // Once panel.state updates to symbol: 'NVDA', the iframe still keeps its URL without reloading.
+  const afterSymbolState = readState({ symbol: 'NVDA', interval: 'D' })
+  live = syncLiveChart(live, initial, afterSymbolState, 'dark')
+  assert.ok(live)
+  assert.equal(live.url, initialUrl)
+  assert.equal(live.state.symbol, 'NVDA')
+
+  // User changes interval to '15' in the widget toolbar.
+  const intervalChanged = applyWidgetUpdate(live, afterSymbolState, { symbol: 'NVDA', interval: '15' })
+  assert.deepEqual(intervalChanged.patch, { interval: '15' })
+  assert.equal(intervalChanged.live.url, initialUrl)
+  assert.equal(intervalChanged.live.state.interval, '15')
+
+  const afterIntervalState = readState({ symbol: 'NVDA', interval: '15' })
+  live = syncLiveChart(intervalChanged.live, afterSymbolState, afterIntervalState, 'dark')
+  assert.ok(live)
+  assert.equal(live.url, initialUrl)
+  assert.equal(live.state.interval, '15')
+
+  // If the component unmounts and remounts from the persisted panel.state, it mounts with NVDA and 15.
+  const remounted = syncLiveChart(null, null, afterIntervalState, 'dark')
+  assert.ok(remounted)
+  assert.equal(remounted.state.symbol, 'NVDA')
+  assert.equal(remounted.state.interval, '15')
+})
+
+test('changing interval in the widget when a range was set clears range, while initial range bar-size is ignored', () => {
+  const initial = readState({ symbol: 'NASDAQ:FLWS', interval: 'D', range: '3M' })
+  const live = syncLiveChart(null, null, initial, 'dark')
+  assert.ok(live)
+
+  // Widget picks 60m bars for a 3M range on initial load: this is not a user edit.
+  const initialInfo = applyWidgetUpdate(live, initial, { symbol: 'FLWS', interval: '60' })
+  assert.equal(initialInfo.patch, null)
+  assert.equal(initialInfo.live.state.range, '3M')
+
+  // User then picks 5m bars in the toolbar: interval updates to '5' and range is cleared with null.
+  const edited = applyWidgetUpdate(initialInfo.live, initial, { symbol: 'FLWS', interval: '5' })
+  assert.deepEqual(edited.patch, { interval: '5', range: null })
+  assert.equal(edited.live.state.interval, '5')
+  assert.equal(edited.live.state.range, undefined)
+})
+
+test('external state changes or scheme switches load a new widget address using the persisted symbol', () => {
+  const initial = readState({ symbol: 'NASDAQ:FLWS', interval: 'D' })
+  let live = syncLiveChart(null, null, initial, 'dark')
+  assert.ok(live)
+  const initialUrl = live.url
+
+  // User switches symbol to AAPL in the widget, and state persists it.
+  live = applyWidgetUpdate(live, initial, { symbol: 'AAPL' }).live
+  const afterUser = readState({ symbol: 'AAPL', interval: 'D' })
+  live = syncLiveChart(live, initial, afterUser, 'dark')
+  assert.ok(live)
+  assert.equal(live.url, initialUrl)
+
+  // Assistant adds RSI study: iframe reloads at AAPL with RSI, not back at FLWS.
+  const withStudy = readState({ symbol: 'AAPL', interval: 'D', studies: ['rsi'] })
+  live = syncLiveChart(live, afterUser, withStudy, 'dark')
+  assert.ok(live)
+  assert.notEqual(live.url, initialUrl)
+  assert.equal(live.state.symbol, 'AAPL')
+  assert.deepEqual(live.state.studies, ['rsi'])
 })
