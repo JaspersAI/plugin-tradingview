@@ -7,12 +7,18 @@ import {
 } from "react";
 import { useBridge, useData, usePublish, type PanelRef } from "@jaspers-ai/sdk";
 import {
+  nextFrameTarget,
   nextQuote,
   QUOTE_EVERY_MS,
   readQuote,
+  readQuoteSymbol,
   readState,
+  readSymbolInfo,
+  sameSymbol,
+  symbolInfoRequest,
   WIDGET_ORIGIN,
-  widgetUrl,
+  type FrameTarget,
+  type Interval,
   type Quote,
   type Scheme,
 } from "./chart";
@@ -54,13 +60,19 @@ function Chart({
   const bridge = useBridge();
   const scheme = useColorScheme();
   const state = readState(raw);
-  const url = state.symbol ? widgetUrl(state, scheme) : null;
+  const targetRef = useRef<FrameTarget | null>(null);
+  const target = nextFrameTarget(targetRef.current, state, scheme);
+  targetRef.current = target;
+  const panelRef = useRef(panel);
+  panelRef.current = panel;
   const frame = useRef<HTMLIFrameElement>(null);
   const latest = useRef<Quote | null>(null);
   const shown = useRef<{ quote: Quote | null; at: number }>({
     quote: null,
     at: 0,
   });
+  const frameRangeInterval = useRef<Interval | null>(null);
+  const nextRequestId = useRef(1);
   const [quote, setQuote] = useState<Quote | null>(null);
 
   // Another address is another chart, or the same one loaded again in the other scheme: either way
@@ -68,10 +80,49 @@ function Chart({
   useEffect(() => {
     latest.current = null;
     shown.current = { quote: null, at: 0 };
+    frameRangeInterval.current = null;
     setQuote(null);
-  }, [url]);
+  }, [target.rev]);
 
   useEffect(() => {
+    function askSymbolInfo(): void {
+      frame.current?.contentWindow?.postMessage(
+        symbolInfoRequest(nextRequestId.current++),
+        WIDGET_ORIGIN,
+      );
+    }
+    function syncSymbol(nextSymbol: string): void {
+      const current = targetRef.current;
+      if (!current || !nextSymbol || sameSymbol(current.live.symbol, nextSymbol))
+        return;
+      targetRef.current = {
+        ...current,
+        live: { ...current.live, symbol: nextSymbol },
+      };
+      void bridge.setState(panelRef.current, ["symbol"], nextSymbol);
+    }
+    function syncInterval(nextInterval: Interval): void {
+      const current = targetRef.current;
+      if (!current) return;
+      if (current.live.range !== undefined) {
+        if (frameRangeInterval.current === null) {
+          frameRangeInterval.current = nextInterval;
+          return;
+        }
+        if (frameRangeInterval.current === nextInterval) return;
+      } else if (current.live.interval === nextInterval) {
+        return;
+      }
+      frameRangeInterval.current = nextInterval;
+      const hadRange = current.live.range !== undefined;
+      const { range: _range, ...restLive } = current.live;
+      targetRef.current = {
+        ...current,
+        live: { ...restLive, interval: nextInterval },
+      };
+      void bridge.setState(panelRef.current, ["interval"], nextInterval);
+      if (hadRange) void bridge.setState(panelRef.current, ["range"], null);
+    }
     function offer(): void {
       const now = Date.now();
       const next = nextQuote(
@@ -92,30 +143,51 @@ function Chart({
       )
         return;
       const posted = readQuote(event.data);
-      if (!posted) return;
-      latest.current = posted;
-      offer();
+      if (posted) {
+        latest.current = posted;
+        offer();
+        const quoteSymbol = readQuoteSymbol(event.data);
+        if (quoteSymbol) syncSymbol(quoteSymbol);
+        askSymbolInfo();
+        return;
+      }
+      const info = readSymbolInfo(event.data);
+      if (info) {
+        if (info.name) syncSymbol(info.name);
+        if (info.interval) syncInterval(info.interval);
+      }
+    }
+    function onLeave(): void {
+      askSymbolInfo();
     }
     window.addEventListener("message", onMessage);
+    window.addEventListener("blur", onLeave);
+    document.addEventListener("visibilitychange", onLeave);
     // A price that moved inside the interval goes out once the interval has passed, quote or no quote.
-    const timer = setInterval(offer, QUOTE_EVERY_MS);
+    const timer = setInterval(() => {
+      offer();
+      askSymbolInfo();
+    }, QUOTE_EVERY_MS);
     return () => {
       window.removeEventListener("message", onMessage);
+      window.removeEventListener("blur", onLeave);
+      document.removeEventListener("visibilitychange", onLeave);
       clearInterval(timer);
     };
-  }, []);
+  }, [bridge]);
 
   usePublish(panel, quote ? { ...state, quote } : { ...state });
 
   return (
     <div className="tv-root">
-      {url ? (
-        // Keyed on the address: the widget reads its chart from the hash once, so a new one is a new page.
+      {target.url ? (
+        // Keyed on the frame revision: external state or scheme changes load a new page, while
+        // state writes synced from in-chart edits keep the live frame intact.
         <iframe
-          key={url}
+          key={target.rev}
           ref={frame}
           className="tv-frame"
-          src={url}
+          src={target.url}
           title={`${state.symbol} chart`}
         />
       ) : (

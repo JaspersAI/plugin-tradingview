@@ -305,6 +305,18 @@ export interface Output extends State {
   quote?: Quote
 }
 
+export interface SymbolInfo {
+  name?: string
+  interval?: Interval
+}
+
+export interface FrameTarget {
+  url: string | null
+  rev: number
+  live: State
+  scheme: Scheme
+}
+
 /** The app's light or dark, which the widget draws in. The view reads it from its page; a panel's state never holds it. */
 export type Scheme = 'light' | 'dark'
 
@@ -417,6 +429,93 @@ export function readQuote(message: unknown): Quote | null {
     changePercent: finite(data['change_percent']),
     volume: finite(data['volume']),
   })
+}
+
+/**
+ * The symbol a quoteUpdate message names for the chart's main series, or null when the message is
+ * not a quoteUpdate. Preserves an explicit exchange prefix from `original_name` except for
+ * TradingView's internal Cboe/delayed quote feed prefixes (`BATS`, `*_DLY`, `*_DL`), which the
+ * embed widget does not take back as chart symbols.
+ */
+export function readQuoteSymbol(message: unknown): string | null {
+  const post = record(typeof message === 'string' ? parseJson(message) : message)
+  const data = post?.['name'] === 'quoteUpdate' ? record(post['data']) : null
+  if (!data) return null
+  const shortName = resolveSymbol(data['short_name'])
+  if (!shortName) return null
+  const original = resolveSymbol(data['original_name'])
+  if (original.includes(':')) {
+    const exchange = original.slice(0, original.indexOf(':'))
+    if (!/^(?:BATS|.*_DLY?)$/i.test(exchange)) return original
+  }
+  return shortName
+}
+
+/**
+ * Whether two symbols refer to the same instrument: compares full `EXCHANGE:TICKER` when both
+ * carry an exchange prefix, and compares the ticker root when either is bare.
+ */
+export function sameSymbol(a: string, b: string): boolean {
+  const left = resolveSymbol(a)
+  const right = resolveSymbol(b)
+  if (left === '' || right === '') return left === right
+  if (left.includes(':') && right.includes(':')) return left === right
+  return tickerOf(left) === tickerOf(right)
+}
+
+function tickerOf(symbol: string): string {
+  const colon = symbol.indexOf(':')
+  return colon === -1 ? symbol : symbol.slice(colon + 1)
+}
+
+/** A postMessage payload asking TradingView's widget for its active symbol and bar interval. */
+export function symbolInfoRequest(id: number): string {
+  return JSON.stringify({
+    id,
+    type: 'get',
+    name: 'symbolInfo',
+    client_id: 'jaspers',
+    data: {},
+    provider: 'TradingView',
+  })
+}
+
+/** A symbolInfo reply the widget posted, with the chart's active symbol and bar interval. */
+export function readSymbolInfo(message: unknown): SymbolInfo | null {
+  const post = record(typeof message === 'string' ? parseJson(message) : message)
+  const data = post?.['name'] === 'symbolInfo' ? record(post['data']) : null
+  if (!data) return null
+  const name = resolveSymbol(data['name']) || undefined
+  const interval = INTERVALS.find((i) => i === data['interval'])
+  if (!name && !interval) return null
+  return defined({ name, interval })
+}
+
+/**
+ * Resolves the iframe address and revision for the current render. When `state` catches up to
+ * in-chart symbol or interval edits already reflected in `current.live`, the mounted iframe's
+ * `url` and `rev` are kept so the chart does not reload; when `state` or `scheme` changes
+ * externally, `rev` advances and `url` updates to load the new chart.
+ */
+export function nextFrameTarget(current: FrameTarget | null, state: State, scheme: Scheme): FrameTarget {
+  if (!state.symbol) {
+    return { url: null, rev: current ? current.rev : 0, live: state, scheme }
+  }
+  if (
+    current &&
+    current.url !== null &&
+    current.scheme === scheme &&
+    sameSymbol(state.symbol, current.live.symbol) &&
+    widgetUrl({ ...state, symbol: current.live.symbol }, scheme) === widgetUrl(current.live, current.scheme)
+  ) {
+    return { url: current.url, rev: current.rev, live: state, scheme }
+  }
+  return {
+    url: widgetUrl(state, scheme),
+    rev: (current?.rev ?? 0) + 1,
+    live: state,
+    scheme,
+  }
 }
 
 /**

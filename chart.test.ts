@@ -1,6 +1,26 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { MAX_COMPARE, nextQuote, QUOTE_EVERY_MS, type Quote, readQuote, readState, resolveSymbol, resolveTimezone, type State, summarize, TIMEZONES, WIDGET_ORIGIN, widgetUrl } from './chart.ts'
+import {
+   type FrameTarget,
+  MAX_COMPARE,
+  nextFrameTarget,
+  nextQuote,
+  QUOTE_EVERY_MS,
+  type Quote,
+  readQuote,
+  readQuoteSymbol,
+  readState,
+  readSymbolInfo,
+  resolveSymbol,
+  resolveTimezone,
+  sameSymbol,
+  type State,
+  summarize,
+  symbolInfoRequest,
+  TIMEZONES,
+  WIDGET_ORIGIN,
+  widgetUrl,
+} from './chart.ts'
 import { INSTRUCTIONS } from './instructions.ts'
 
 // The plugin's pure half: the state a panel holds read the forgiving way, the widget's address,
@@ -249,4 +269,80 @@ test('the instructions tell the assistant how to set and clear state.timezone', 
   assert.match(INSTRUCTIONS, /state\.timezone/)
   assert.match(INSTRUCTIONS, /America\/New_York/)
   assert.match(INSTRUCTIONS, /exchange/)
+})
+
+test('readQuoteSymbol extracts the chart symbol from quoteUpdate and sameSymbol matches bare tickers to their exchange symbol', () => {
+  assert.equal(readQuoteSymbol(QUOTE_UPDATE), 'AAPL')
+  assert.equal(readQuoteSymbol(JSON.stringify(QUOTE_UPDATE)), 'AAPL')
+  assert.equal(
+    readQuoteSymbol({
+      name: 'quoteUpdate',
+      data: { original_name: 'NASDAQ:BSP', short_name: 'BSP', last_price: 12.4 },
+    }),
+    'NASDAQ:BSP',
+  )
+  assert.equal(
+    readQuoteSymbol({
+      name: 'quoteUpdate',
+      data: { original_name: 'BINANCE:BTCUSDT', short_name: 'BTCUSDT', last_price: 92000 },
+    }),
+    'BINANCE:BTCUSDT',
+  )
+  assert.equal(readQuoteSymbol({ name: 'tv-widget-load' }), null)
+
+  assert.equal(sameSymbol('NASDAQ:AAPL', 'AAPL'), true)
+  assert.equal(sameSymbol('NASDAQ:FLWS', 'BSP'), false)
+  assert.equal(sameSymbol('NASDAQ:FLWS', 'NASDAQ:BSP'), false)
+  assert.equal(sameSymbol('NYSE:GOLD', 'TVC:GOLD'), false)
+  assert.equal(sameSymbol('NASDAQ:FLWS', 'NASDAQ:FLWS'), true)
+})
+
+test('symbolInfoRequest and readSymbolInfo read the active symbol and interval from the widget', () => {
+  const req = JSON.parse(symbolInfoRequest(7))
+  assert.deepEqual(req, {
+    id: 7,
+    type: 'get',
+    name: 'symbolInfo',
+    client_id: 'jaspers',
+    data: {},
+    provider: 'TradingView',
+  })
+
+  const reply = {
+    id: 7,
+    type: 'on',
+    name: 'symbolInfo',
+    client_id: 'jaspers',
+    data: { name: 'BSP', exchange: 'Cboe One', description: 'BSP', type: 'stock', interval: '30' },
+    provider: 'TradingView',
+  }
+  assert.deepEqual(readSymbolInfo(reply), { name: 'BSP', interval: '30' })
+  assert.deepEqual(readSymbolInfo(JSON.stringify(reply)), { name: 'BSP', interval: '30' })
+  assert.deepEqual(readSymbolInfo({ name: 'symbolInfo', data: { name: 'BSP', interval: '2h' } }), { name: 'BSP' })
+  assert.equal(readSymbolInfo({ name: 'quoteUpdate', data: {} }), null)
+})
+
+test('nextFrameTarget keeps the mounted frame when panel state catches up to in-chart edits, and reloads on external state or theme changes', () => {
+  const flws: State = { symbol: 'NASDAQ:FLWS', interval: 'D', style: 'candles', studies: [] }
+  const first: FrameTarget = nextFrameTarget(null, flws, 'dark')
+  assert.equal(first.rev, 1)
+  assert.equal(first.url, widgetUrl(flws, 'dark'))
+
+  // User changed symbol to BSP and interval to 30 inside the widget; live state reflects the frame before panel.state catches up.
+  const bsp: State = { symbol: 'BSP', interval: '30', style: 'candles', studies: [] }
+  const liveSynced: FrameTarget = { ...first, live: bsp }
+  const caughtUp = nextFrameTarget(liveSynced, bsp, 'dark')
+  assert.equal(caughtUp.rev, 1)
+  assert.equal(caughtUp.url, first.url)
+
+  // Assistant adds an indicator externally -> reloads the frame at the new state (BSP, 30, rsi).
+  const withRsi: State = { ...bsp, studies: ['rsi'] }
+  const reloaded = nextFrameTarget(caughtUp, withRsi, 'dark')
+  assert.equal(reloaded.rev, 2)
+  assert.equal(reloaded.url, widgetUrl(withRsi, 'dark'))
+
+  // Assistant sets symbol back to the original NASDAQ:FLWS -> increments rev even if url matches an earlier one.
+  const backToFlws = nextFrameTarget({ ...first, live: bsp }, flws, 'dark')
+  assert.equal(backToFlws.rev, 2)
+  assert.equal(backToFlws.url, widgetUrl(flws, 'dark'))
 })
