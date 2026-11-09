@@ -317,9 +317,14 @@ export interface SymbolInfo {
 
 export interface LiveChart {
   url: string
+  revision: number
   state: State
   scheme: Scheme
   widgetInterval?: Interval
+}
+
+export function frameKey(live: LiveChart): string {
+  return `${live.revision}:${live.url}`
 }
 
 export type StatePatch = Partial<{
@@ -375,12 +380,15 @@ export function syncLiveChart(
 ): LiveChart | null {
   if (!nextPropState.symbol) return null
   if (!live || live.scheme !== scheme || prevPropState === null) {
-    return { url: widgetUrl(nextPropState, scheme), state: nextPropState, scheme }
+    return {
+      url: widgetUrl(nextPropState, scheme),
+      revision: (live?.revision ?? 0) + 1,
+      state: nextPropState,
+      scheme,
+    }
   }
   const externalSymbolChange =
-    nextPropState.symbol !== prevPropState.symbol &&
-    nextPropState.symbol !== live.state.symbol &&
-    !sameSymbol(nextPropState.symbol, live.state.symbol)
+    nextPropState.symbol !== prevPropState.symbol && nextPropState.symbol !== live.state.symbol
   const externalIntervalChange =
     nextPropState.interval !== prevPropState.interval && nextPropState.interval !== live.state.interval
   const externalRangeChange = nextPropState.range !== prevPropState.range && nextPropState.range !== live.state.range
@@ -391,7 +399,12 @@ export function syncLiveChart(
     nextPropState.extendedHours !== live.state.extendedHours ||
     nextPropState.timezone !== live.state.timezone
   if (externalSymbolChange || externalIntervalChange || externalRangeChange || otherChanged) {
-    return { url: widgetUrl(nextPropState, scheme), state: nextPropState, scheme }
+    return {
+      url: widgetUrl(nextPropState, scheme),
+      revision: live.revision + 1,
+      state: nextPropState,
+      scheme,
+    }
   }
   return live
 }
@@ -409,10 +422,13 @@ export function applyWidgetUpdate(
   let nextState = live.state
   let widgetInterval = live.widgetInterval
 
-  const nextSymbol = update.symbol ? resolveSymbol(update.symbol) : ''
-  if (nextSymbol !== '' && !sameSymbol(nextState.symbol, nextSymbol)) {
-    nextState = { ...nextState, symbol: nextSymbol }
-    patch.symbol = nextSymbol
+  const rawSymbol = typeof update.symbol === 'string' ? update.symbol.trim().toUpperCase() : ''
+  if (rawSymbol !== '' && !sameSymbol(nextState.symbol, rawSymbol)) {
+    const nextSymbol = resolveSymbol(rawSymbol)
+    if (nextSymbol !== '' && !sameSymbol(nextState.symbol, nextSymbol)) {
+      nextState = { ...nextState, symbol: nextSymbol }
+      patch.symbol = nextSymbol
+    }
   }
 
   if (update.interval !== undefined) {

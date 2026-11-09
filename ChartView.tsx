@@ -8,6 +8,7 @@ import {
 import { useBridge, useData, usePublish, type PanelRef } from "@jaspers-ai/sdk";
 import {
   applyWidgetUpdate,
+  frameKey,
   isWidgetReady,
   nextQuote,
   QUOTE_EVERY_MS,
@@ -72,6 +73,7 @@ function Chart({
   liveRef.current = live;
   prevPropStateRef.current = state;
   const url = live?.url ?? null;
+  const key = live ? frameKey(live) : null;
   const activeState = live?.state ?? state;
 
   const frame = useRef<HTMLIFrameElement>(null);
@@ -92,7 +94,7 @@ function Chart({
     latest.current = null;
     shown.current = { quote: null, at: 0 };
     setQuote(null);
-  }, [url]);
+  }, [key]);
 
   useEffect(() => {
     function askSymbolInfo(): void {
@@ -178,10 +180,10 @@ function Chart({
 
   return (
     <div className="tv-root">
-      {url ? (
-        // Keyed on the address: the widget reads its chart from the hash once, so a new one is a new page.
+      {url && key ? (
+        // Keyed on the live chart revision and address: the widget reads its chart from the hash once, so a new one is a new page.
         <iframe
-          key={url}
+          key={key}
           ref={frame}
           className="tv-frame"
           src={url}

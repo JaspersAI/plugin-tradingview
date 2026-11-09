@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   applyWidgetUpdate,
+  frameKey,
   isWidgetReady,
   MAX_COMPARE,
   nextQuote,
@@ -406,4 +407,45 @@ test('external state changes or scheme switches load a new widget address using 
   assert.notEqual(live.url, initialUrl)
   assert.equal(live.state.symbol, 'AAPL')
   assert.deepEqual(live.state.studies, ['rsi'])
+})
+
+test('reverting panel.state back to the initial symbol after an in-widget edit advances frameKey so the iframe remounts', () => {
+  const initial = readState({ symbol: 'NASDAQ:FLWS', interval: 'D' })
+  let live = syncLiveChart(null, null, initial, 'dark')
+  assert.ok(live)
+  const initialKey = frameKey(live)
+
+  // User changes symbol to NVDA in the widget; state settles to NVDA without changing frameKey.
+  live = applyWidgetUpdate(live, initial, { symbol: 'NVDA' }).live
+  const afterUser = readState({ symbol: 'NVDA', interval: 'D' })
+  live = syncLiveChart(live, initial, afterUser, 'dark')
+  assert.ok(live)
+  assert.equal(frameKey(live), initialKey)
+
+  // Assistant sets symbol back to NASDAQ:FLWS: URL matches initialUrl, but frameKey advances to remount the iframe.
+  const reverted = readState({ symbol: 'NASDAQ:FLWS', interval: 'D' })
+  live = syncLiveChart(live, afterUser, reverted, 'dark')
+  assert.ok(live)
+  assert.equal(live.state.symbol, 'NASDAQ:FLWS')
+  assert.notEqual(frameKey(live), initialKey)
+})
+
+test('exchange-qualified symbols whose ticker matches a macro alias stay intact, and cross-exchange changes reload', () => {
+  const dow = readState({ symbol: 'NYSE:DOW', interval: 'D' })
+  let live = syncLiveChart(null, null, dow, 'dark')
+  assert.ok(live)
+  // Widget reports bare ticker 'DOW' for NYSE:DOW: must not rewrite state.symbol to DJ:DJI.
+  const afterQuote = applyWidgetUpdate(live, dow, { symbol: 'DOW' })
+  assert.equal(afterQuote.patch, null)
+  assert.equal(afterQuote.live.state.symbol, 'NYSE:DOW')
+
+  // Switching externally between TVC:GOLD and NYSE:GOLD reloads the chart even though both end in :GOLD.
+  const goldMetal = readState({ symbol: 'TVC:GOLD', interval: 'D' })
+  const goldMiner = readState({ symbol: 'NYSE:GOLD', interval: 'D' })
+  const liveMetal = syncLiveChart(null, null, goldMetal, 'dark')
+  assert.ok(liveMetal)
+  const liveMiner = syncLiveChart(liveMetal, goldMetal, goldMiner, 'dark')
+  assert.ok(liveMiner)
+  assert.equal(liveMiner.state.symbol, 'NYSE:GOLD')
+  assert.notEqual(liveMiner.url, liveMetal.url)
 })
